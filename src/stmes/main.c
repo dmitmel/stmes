@@ -1,6 +1,8 @@
 #include "stmes/main.h"
 #include "stmes/gpio.h"
+#include "stmes/timers.h"
 #include "stmes/utils.h"
+#include <stm32f4xx_hal.h>
 
 void SystemClock_Config(void);
 
@@ -9,16 +11,16 @@ int main(void) {
   SystemClock_Config();
 
   MX_GPIO_Init();
+  MX_TIM4_Init();
 
   for (int i = 0; i < 10; i++) {
     HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
     HAL_Delay(100);
   }
 
-  while (1) {
-    HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
-    HAL_Delay(1000);
-  }
+  HAL_TIM_Base_Start_IT(&htim4);
+
+  while (1) {}
 }
 
 void HAL_MspInit(void) {
