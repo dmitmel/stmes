@@ -1,0 +1,57 @@
+{
+  "$schema": "https://puremourning.github.io/vimspector/schema/vimspector.schema.json",
+  "configurations": {
+    "attach and reset": {
+      "adapter": "vscode-cpptools",
+
+      "variables": {
+        "cwd": "${workspaceFolder}",
+        "program": "${workspaceFolder}/.pio/build/debug/firmware.elf",
+        "port": "${unusedLocalPort}"
+      },
+      "configuration": {
+        "request": "launch",
+        "program": "${program}",
+        "stopAtEntry": false,
+        "externalConsole": false,
+
+        "MIMode": "gdb",
+        "MIDebuggerPath": "arm-none-eabi-gdb",
+        "MIDebuggerServerAddress": "localhost:${port}",
+        "targetArchitecture": "arm",
+
+        "debugServerPath": "openocd",
+        "debugServerArgs": "-c \"gdb_port ${port}; tcl_port disabled; telnet_port disabled\" -f interface/stlink.cfg -c \"transport select hla_swd\" -f target/stm32f4x.cfg -c \"$$_TARGETNAME configure -event gdb-detach { resume } \"",
+        "serverStarted": "Listening on port \\d+ for gdb connections",
+        "filterStdout": false,
+        "filterStderr": true,
+
+        "postRemoteConnectCommands": [
+          { "text": "monitor init" },
+          { "text": "load" },
+          { "text": "monitor reset halt" },
+          // { "text": "monitor arm semihosting enable" },
+          { "text": "tbreak main" },
+          { "text": "-exec-continue" }
+        ],
+        "launchCompleteCommand": "None"
+
+        // "logging": {
+        //   "exceptions": true,
+        //   "moduleLoad": true,
+        //   "programOutput": true,
+        //   "engineLogging": true,
+        //   "trace": true
+        // }
+      }
+    },
+
+    "attach and reset (stop at entry)": {
+      "extends": "attach and reset",
+      "configuration": {
+        "request": "launch",
+        "stopAtEntry": true
+      }
+    }
+  }
+}
