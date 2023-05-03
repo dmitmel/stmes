@@ -4,9 +4,16 @@
 #include "stmes/utils.h"
 #include <stm32f4xx_hal.h>
 
-void SystemClock_Config(void);
+extern void initialise_monitor_handles(void);
 
 int main(void) {
+#ifdef ARM_SEMIHOSTING_ENABLE
+  // Actually enable the semihosting machinery only when the debugger is attached.
+  if (CoreDebug->DHCSR & CoreDebug_DHCSR_C_DEBUGEN_Msk) {
+    initialise_monitor_handles();
+  }
+#endif
+
   HAL_Init();
   SystemClock_Config();
 

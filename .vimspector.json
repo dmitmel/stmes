@@ -30,7 +30,7 @@
           { "text": "monitor init" },
           { "text": "load" },
           { "text": "monitor reset halt" },
-          // { "text": "monitor arm semihosting enable" },
+          { "text": "monitor arm semihosting enable" },
           { "text": "tbreak main" },
           { "text": "-exec-continue" }
         ],
