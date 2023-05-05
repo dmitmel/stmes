@@ -96,24 +96,25 @@ void MX_TIM4_Init(void) {
   };
   TIM_OC_InitTypeDef channel1_init = {
     .OCMode = TIM_OCMODE_TIMING,
-    .Pulse = 480,
+    .Pulse = 33,
     .OCPolarity = TIM_OCPOLARITY_HIGH,
     .OCFastMode = TIM_OCFAST_DISABLE,
   };
   TIM_OC_InitTypeDef channel2_init = {
     .OCMode = TIM_OCMODE_TIMING,
-    .Pulse = 480 + 10,
+    .Pulse = 33 + 480,
     .OCPolarity = TIM_OCPOLARITY_HIGH,
     .OCFastMode = TIM_OCFAST_DISABLE,
   };
   TIM_OC_InitTypeDef channel3_init = {
-    .OCMode = TIM_OCMODE_TIMING,
-    .Pulse = 480 + 10 + 2,
+    .OCMode = TIM_OCMODE_PWM1,
+    .Pulse = 33 + 480 + 10,
     .OCPolarity = TIM_OCPOLARITY_HIGH,
     .OCFastMode = TIM_OCFAST_DISABLE,
   };
   check_hal_error(HAL_TIM_Base_Init(&htim4));
   check_hal_error(HAL_TIM_OC_Init(&htim4));
+  check_hal_error(HAL_TIM_PWM_Init(&htim4));
   check_hal_error(HAL_TIM_SlaveConfigSynchro(&htim4, &slave_init));
   check_hal_error(HAL_TIMEx_MasterConfigSynchronization(&htim4, &master_init));
   check_hal_error(HAL_TIM_OC_ConfigChannel(&htim4, &channel1_init, TIM_CHANNEL_1));
@@ -121,7 +122,7 @@ void MX_TIM4_Init(void) {
   check_hal_error(HAL_TIM_OC_ConfigChannel(&htim4, &channel2_init, TIM_CHANNEL_2));
   __HAL_TIM_ENABLE_OCxPRELOAD(&htim4, TIM_CHANNEL_2);
   check_hal_error(HAL_TIM_OC_ConfigChannel(&htim4, &channel3_init, TIM_CHANNEL_3));
-  __HAL_TIM_ENABLE_OCxPRELOAD(&htim4, TIM_CHANNEL_3);
+  HAL_TIM_MspPostInit(&htim4);
 }
 
 void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* tim_baseHandle) {
@@ -150,6 +151,16 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef* timHandle) {
       .Alternate = GPIO_AF2_TIM3,
     };
     HAL_GPIO_Init(VGA_HSYNC_GPIO_Port, &gpio_init);
+  } else if (timHandle->Instance == TIM4) {
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+    gpio_init = (GPIO_InitTypeDef){
+      .Pin = VGA_VSYNC_Pin,
+      .Mode = GPIO_MODE_AF_PP,
+      .Pull = GPIO_NOPULL,
+      .Speed = GPIO_SPEED_FREQ_LOW,
+      .Alternate = GPIO_AF2_TIM4,
+    };
+    HAL_GPIO_Init(VGA_VSYNC_GPIO_Port, &gpio_init);
   }
 }
 

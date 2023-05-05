@@ -6,6 +6,9 @@
 #include <stm32f4xx_hal.h>
 #include <string.h>
 
+volatile bool inside_frame_horizontal = false, inside_frame_vertical = false;
+volatile u32 frame_counter = 0;
+
 static const struct VgaTiming VGA_TIMING_640x480_60hz = {
   .pixel_freq_hz = 25175000,
   .visible_width = 640,
@@ -82,16 +85,18 @@ int main(void) {
   check_hal_error(HAL_TIM_Base_Start_IT(&htim4));
   check_hal_error(HAL_TIM_OC_Start_IT(&htim4, TIM_CHANNEL_1));
   check_hal_error(HAL_TIM_OC_Start_IT(&htim4, TIM_CHANNEL_2));
-  check_hal_error(HAL_TIM_OC_Start_IT(&htim4, TIM_CHANNEL_3));
+  check_hal_error(HAL_TIM_PWM_Start_IT(&htim4, TIM_CHANNEL_3));
   check_hal_error(HAL_TIM_PWM_Start_IT(&htim3, TIM_CHANNEL_2));
   check_hal_error(HAL_TIM_OC_Start_IT(&htim3, TIM_CHANNEL_1));
   check_hal_error(HAL_TIM_OC_Start_IT(&htim3, TIM_CHANNEL_3));
 
   while (1) {
-    volatile u32 horz_pos = TIM3->CNT, vert_pos = TIM4->CNT;
-    if (48 <= horz_pos && horz_pos < 48 + 640 && vert_pos < 480) {
-      bool on = ((horz_pos >> 4) + (vert_pos >> 4)) & 1;
-      VGA_PIXEL_GPIO_Port->BSRR = VGA_PIXEL_Pin << (on ? 0U : 16U);
+    while (inside_frame_vertical) {
+      while (inside_frame_horizontal) {
+        u32 horz_pos = TIM3->CNT, vert_pos = TIM4->CNT;
+        bool on = ((horz_pos >> 4) + (vert_pos >> 4)) & 1;
+        VGA_PIXEL_GPIO_Port->BSRR = VGA_PIXEL_Pin << (on ? 0U : 16U);
+      }
     }
   }
 }

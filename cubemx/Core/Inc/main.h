@@ -57,12 +57,12 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define VGA_VSYNC_Pin GPIO_PIN_2
-#define VGA_VSYNC_GPIO_Port GPIOA
 #define VGA_PIXEL_Pin GPIO_PIN_5
 #define VGA_PIXEL_GPIO_Port GPIOA
 #define VGA_HSYNC_Pin GPIO_PIN_7
 #define VGA_HSYNC_GPIO_Port GPIOA
+#define VGA_VSYNC_Pin GPIO_PIN_8
+#define VGA_VSYNC_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 

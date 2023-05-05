@@ -1,8 +1,8 @@
 #include "stmes/interrupts.h"
 #include "stmes/gpio.h"
+#include "stmes/main.h"
 #include "stmes/timers.h"
 #include "stmes/utils.h"
-#include <stdio.h>
 #include <stm32f4xx_hal.h>
 
 void NMI_Handler(void) {
@@ -48,17 +48,25 @@ void TIM4_IRQHandler(void) {
 }
 
 void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef* htim) {
-  if (htim == &htim3) {
+  if (htim->Instance == TIM3) {
     if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_3) {
       GPIO_RESET_PIN(VGA_PIXEL_GPIO_Port, VGA_PIXEL_Pin);
+      inside_frame_horizontal = false;
+    } else if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_1) {
+      inside_frame_horizontal = true;
     }
-  } else if (htim == &htim4) {
+  } else if (htim->Instance == TIM4) {
     if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_2) {
-      GPIO_RESET_PIN(VGA_VSYNC_GPIO_Port, VGA_VSYNC_Pin);
-    } else if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_3) {
-      GPIO_SET_PIN(VGA_VSYNC_GPIO_Port, VGA_VSYNC_Pin);
+      GPIO_RESET_PIN(VGA_PIXEL_GPIO_Port, VGA_PIXEL_Pin);
+      inside_frame_vertical = false;
+    } else if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_1) {
+      inside_frame_vertical = true;
     }
   }
 }
 
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim) {}
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim) {
+  if (htim->Instance == TIM4) {
+    frame_counter++;
+  }
+}
