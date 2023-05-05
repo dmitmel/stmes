@@ -43,24 +43,24 @@ void MX_TIM3_Init(void) {
     .ClockSource = TIM_CLOCKSOURCE_INTERNAL,
   };
   TIM_MasterConfigTypeDef master_init = {
-    .MasterOutputTrigger = TIM_TRGO_UPDATE,
+    .MasterOutputTrigger = TIM_TRGO_OC1,
     .MasterSlaveMode = TIM_MASTERSLAVEMODE_ENABLE,
   };
   TIM_OC_InitTypeDef channel1_init = {
     .OCMode = TIM_OCMODE_TIMING,
-    .Pulse = (48 - 20) - 1,
+    .Pulse = 48,
     .OCPolarity = TIM_OCPOLARITY_HIGH,
     .OCFastMode = TIM_OCFAST_DISABLE,
   };
   TIM_OC_InitTypeDef channel2_init = {
     .OCMode = TIM_OCMODE_PWM1,
-    .Pulse = (48 + 640 + 16) - 1,
+    .Pulse = 48 + 640 + 16,
     .OCPolarity = TIM_OCPOLARITY_HIGH,
     .OCFastMode = TIM_OCFAST_DISABLE,
   };
   TIM_OC_InitTypeDef channel3_init = {
     .OCMode = TIM_OCMODE_TIMING,
-    .Pulse = (48 + 640 - 26) - 1,
+    .Pulse = 48 + 640,
     .OCPolarity = TIM_OCPOLARITY_HIGH,
     .OCFastMode = TIM_OCFAST_DISABLE,
   };
@@ -94,9 +94,34 @@ void MX_TIM4_Init(void) {
     .MasterOutputTrigger = TIM_TRGO_RESET,
     .MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE,
   };
+  TIM_OC_InitTypeDef channel1_init = {
+    .OCMode = TIM_OCMODE_TIMING,
+    .Pulse = 480,
+    .OCPolarity = TIM_OCPOLARITY_HIGH,
+    .OCFastMode = TIM_OCFAST_DISABLE,
+  };
+  TIM_OC_InitTypeDef channel2_init = {
+    .OCMode = TIM_OCMODE_TIMING,
+    .Pulse = 480 + 10,
+    .OCPolarity = TIM_OCPOLARITY_HIGH,
+    .OCFastMode = TIM_OCFAST_DISABLE,
+  };
+  TIM_OC_InitTypeDef channel3_init = {
+    .OCMode = TIM_OCMODE_TIMING,
+    .Pulse = 480 + 10 + 2,
+    .OCPolarity = TIM_OCPOLARITY_HIGH,
+    .OCFastMode = TIM_OCFAST_DISABLE,
+  };
   check_hal_error(HAL_TIM_Base_Init(&htim4));
+  check_hal_error(HAL_TIM_OC_Init(&htim4));
   check_hal_error(HAL_TIM_SlaveConfigSynchro(&htim4, &slave_init));
   check_hal_error(HAL_TIMEx_MasterConfigSynchronization(&htim4, &master_init));
+  check_hal_error(HAL_TIM_OC_ConfigChannel(&htim4, &channel1_init, TIM_CHANNEL_1));
+  __HAL_TIM_ENABLE_OCxPRELOAD(&htim4, TIM_CHANNEL_1);
+  check_hal_error(HAL_TIM_OC_ConfigChannel(&htim4, &channel2_init, TIM_CHANNEL_2));
+  __HAL_TIM_ENABLE_OCxPRELOAD(&htim4, TIM_CHANNEL_2);
+  check_hal_error(HAL_TIM_OC_ConfigChannel(&htim4, &channel3_init, TIM_CHANNEL_3));
+  __HAL_TIM_ENABLE_OCxPRELOAD(&htim4, TIM_CHANNEL_3);
 }
 
 void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* tim_baseHandle) {

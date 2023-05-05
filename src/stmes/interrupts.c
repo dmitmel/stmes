@@ -49,16 +49,14 @@ void TIM4_IRQHandler(void) {
 
 void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef* htim) {
   if (htim == &htim3) {
-    if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_1) {
-      GPIO_SET_PIN(VGA_PIXEL_GPIO_Port, VGA_PIXEL_Pin);
-      volatile u32 vert_pos = TIM4->CNT;
-      if (vert_pos >= 480 + 10 + 2) {
-        GPIO_SET_PIN(VGA_VSYNC_GPIO_Port, VGA_VSYNC_Pin);
-      } else if (vert_pos >= 480 + 10) {
-        GPIO_RESET_PIN(VGA_VSYNC_GPIO_Port, VGA_VSYNC_Pin);
-      }
-    } else if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_3) {
+    if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_3) {
       GPIO_RESET_PIN(VGA_PIXEL_GPIO_Port, VGA_PIXEL_Pin);
+    }
+  } else if (htim == &htim4) {
+    if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_2) {
+      GPIO_RESET_PIN(VGA_VSYNC_GPIO_Port, VGA_VSYNC_Pin);
+    } else if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_3) {
+      GPIO_SET_PIN(VGA_VSYNC_GPIO_Port, VGA_VSYNC_Pin);
     }
   }
 }
