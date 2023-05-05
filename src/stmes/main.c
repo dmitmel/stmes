@@ -2,9 +2,43 @@
 #include "stmes/gpio.h"
 #include "stmes/timers.h"
 #include "stmes/utils.h"
+#include <stdio.h>
 #include <stm32f4xx_hal.h>
+#include <string.h>
+
+static const struct VgaTiming VGA_TIMING_640x480_60hz = {
+  .pixel_freq_hz = 25175000,
+  .visible_width = 640,
+  .horz_front_porch = 16,
+  .hsync_polarity = SYNC_PULSE_POLARITY_NEGATIVE,
+  .hsync_pulse = 96,
+  .horz_back_porch = 48,
+  .visible_height = 480,
+  .vert_front_porch = 10,
+  .vsync_polarity = SYNC_PULSE_POLARITY_NEGATIVE,
+  .vsync_pulse = 2,
+  .vert_back_porch = 33,
+};
+
+static const struct VgaTiming VGA_TIMING_800x600_60hz = {
+  .pixel_freq_hz = 40000000,
+  .visible_width = 800,
+  .horz_front_porch = 40,
+  .hsync_polarity = SYNC_PULSE_POLARITY_POSITIVE,
+  .hsync_pulse = 128,
+  .horz_back_porch = 88,
+  .visible_height = 600,
+  .vert_front_porch = 1,
+  .vsync_polarity = SYNC_PULSE_POLARITY_POSITIVE,
+  .vsync_pulse = 4,
+  .vert_back_porch = 23,
+};
 
 extern void initialise_monitor_handles(void);
+
+// void* blackbox(void* ptr) {
+//   return ptr;
+// }
 
 int main(void) {
 #ifdef ARM_SEMIHOSTING_ENABLE
@@ -18,16 +52,45 @@ int main(void) {
   SystemClock_Config();
 
   MX_GPIO_Init();
+  MX_TIM2_Init();
+  MX_TIM3_Init();
   MX_TIM4_Init();
 
-  for (int i = 0; i < 10; i++) {
-    HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
-    HAL_Delay(100);
+  check_hal_error(HAL_TIM_Base_Start(&htim2));
+
+  // static u8 pixels_arr[320] = { 0 };
+  // static u32 dma_arr[320] = { 0 };
+  // u8* pixels = blackbox(pixels_arr);
+  // u32* dma = blackbox(dma_arr);
+  //
+  // volatile u32 start_time = TIM2->CNT;
+  //
+  // u8 prev = 0, pixel, diff, set, reset;
+  // for (u32* dma_end = dma + 320; dma != dma_end;) {
+  //   pixel = *pixels++;
+  //   diff = pixel ^ prev;
+  //   set = pixel & diff, reset = ~pixel & diff;
+  //   *dma++ = (reset << 24) | (set << 8);
+  //   prev = pixel;
+  // }
+  //
+  // volatile u32 end_time = TIM2->CNT;
+  // printf("elapsed ticks = %" PRIu32 "\n", end_time - start_time);
+  //
+  // blackbox(dma);
+
+  check_hal_error(HAL_TIM_Base_Start_IT(&htim4));
+  check_hal_error(HAL_TIM_PWM_Start_IT(&htim3, TIM_CHANNEL_2));
+  check_hal_error(HAL_TIM_OC_Start_IT(&htim3, TIM_CHANNEL_1));
+  check_hal_error(HAL_TIM_OC_Start_IT(&htim3, TIM_CHANNEL_3));
+
+  while (1) {
+    volatile u32 horz_pos = TIM3->CNT, vert_pos = TIM4->CNT;
+    if (48 <= horz_pos && horz_pos < 48 + 640 && vert_pos < 480) {
+      bool on = ((horz_pos) + (vert_pos >> 5)) & 1;
+      VGA_PIXEL_GPIO_Port->BSRR = VGA_PIXEL_Pin << (on ? 0U : 16U);
+    }
   }
-
-  HAL_TIM_Base_Start_IT(&htim4);
-
-  while (1) {}
 }
 
 void HAL_MspInit(void) {
@@ -51,9 +114,7 @@ void SystemClock_Config(void) {
       .PLLQ = 4,
     },
   };
-  if (HAL_RCC_OscConfig(&rcc_osc_init) != HAL_OK) {
-    Error_Handler();
-  }
+  check_hal_error(HAL_RCC_OscConfig(&rcc_osc_init));
 
   RCC_ClkInitTypeDef rcc_clk_init = {
     .ClockType =
@@ -64,9 +125,7 @@ void SystemClock_Config(void) {
     .APB2CLKDivider = RCC_HCLK_DIV1,
   };
   u32 flash_latency = FLASH_LATENCY_3;
-  if (HAL_RCC_ClockConfig(&rcc_clk_init, flash_latency) != HAL_OK) {
-    Error_Handler();
-  }
+  check_hal_error(HAL_RCC_ClockConfig(&rcc_clk_init, flash_latency));
 }
 
 void Error_Handler(void) {

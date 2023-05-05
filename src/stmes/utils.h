@@ -1,3 +1,5 @@
+#include <inttypes.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -17,6 +19,8 @@ typedef intptr_t isize;
 typedef uintptr_t usize;
 typedef float f32;
 typedef double f64;
+
+#define check_hal_error(expr) ((expr) != HAL_OK) ? Error_Handler() : ((void)0)
 
 #ifdef __cplusplus
 }
