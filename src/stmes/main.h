@@ -25,9 +25,6 @@ struct VgaTiming {
   enum SyncPolarity hsync_polarity, vsync_polarity;
 };
 
-extern volatile bool inside_frame_vertical, inside_frame_horizontal;
-extern volatile u32 frame_counter;
-
 #ifdef __cplusplus
 }
 #endif

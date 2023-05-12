@@ -1,13 +1,41 @@
 #include "stmes/timers.h"
+#include "stmes/dma.h"
 #include "stmes/gpio.h"
 #include "stmes/main.h"
 #include "stmes/utils.h"
-#include <stdio.h>
 #include <stm32f4xx_hal.h>
 
+TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
+
+void MX_TIM1_Init(void) {
+  htim1.Instance = TIM1;
+  htim1.Init = (TIM_Base_InitTypeDef){
+    .Prescaler = 0,
+    .CounterMode = TIM_COUNTERMODE_UP,
+    .Period = 2 - 1,
+    .ClockDivision = TIM_CLOCKDIVISION_DIV1,
+    .AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE,
+  };
+  TIM_ClockConfigTypeDef clock_source_init = {
+    .ClockSource = TIM_CLOCKSOURCE_INTERNAL,
+  };
+  TIM_SlaveConfigTypeDef slave_init = {
+    .SlaveMode = TIM_SLAVEMODE_TRIGGER,
+    .InputTrigger = TIM_TS_ITR2,
+  };
+  TIM_MasterConfigTypeDef master_init = {
+    .MasterOutputTrigger = TIM_TRGO_RESET,
+    .MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE,
+  };
+  check_hal_error(HAL_TIM_Base_Init(&htim1));
+  check_hal_error(HAL_TIM_ConfigClockSource(&htim1, &clock_source_init));
+  check_hal_error(HAL_TIM_SlaveConfigSynchro(&htim1, &slave_init));
+  check_hal_error(HAL_TIMEx_MasterConfigSynchronization(&htim1, &master_init));
+  __HAL_TIM_ENABLE_DMA(&htim1, TIM_DMA_UPDATE);
+}
 
 void MX_TIM2_Init(void) {
   htim2.Instance = TIM2;
@@ -125,23 +153,42 @@ void MX_TIM4_Init(void) {
   HAL_TIM_MspPostInit(&htim4);
 }
 
-void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* tim_baseHandle) {
-  if (tim_baseHandle->Instance == TIM2) {
+void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* htim) {
+  if (htim->Instance == TIM1) {
+    __HAL_RCC_TIM1_CLK_ENABLE();
+    hdma_tim1_up.Instance = DMA2_Stream5;
+    hdma_tim1_up.Init = (DMA_InitTypeDef){
+      .Channel = DMA_CHANNEL_6,
+      .Direction = DMA_MEMORY_TO_PERIPH,
+      .PeriphInc = DMA_PINC_DISABLE,
+      .MemInc = DMA_MINC_ENABLE,
+      .PeriphDataAlignment = DMA_PDATAALIGN_WORD,
+      .MemDataAlignment = DMA_MDATAALIGN_WORD,
+      .Mode = DMA_NORMAL,
+      .Priority = DMA_PRIORITY_HIGH,
+      .FIFOMode = DMA_FIFOMODE_ENABLE,
+      .FIFOThreshold = DMA_FIFO_THRESHOLD_FULL,
+      .MemBurst = DMA_MBURST_SINGLE,
+      .PeriphBurst = DMA_PBURST_SINGLE,
+    };
+    check_hal_error(HAL_DMA_Init(&hdma_tim1_up));
+    __HAL_LINKDMA(htim, hdma[TIM_DMA_ID_UPDATE], hdma_tim1_up);
+  } else if (htim->Instance == TIM2) {
     __HAL_RCC_TIM2_CLK_ENABLE();
-  } else if (tim_baseHandle->Instance == TIM3) {
+  } else if (htim->Instance == TIM3) {
     __HAL_RCC_TIM3_CLK_ENABLE();
     HAL_NVIC_SetPriority(TIM3_IRQn, 0, 0);
     HAL_NVIC_EnableIRQ(TIM3_IRQn);
-  } else if (tim_baseHandle->Instance == TIM4) {
+  } else if (htim->Instance == TIM4) {
     __HAL_RCC_TIM4_CLK_ENABLE();
     HAL_NVIC_SetPriority(TIM4_IRQn, 0, 0);
     HAL_NVIC_EnableIRQ(TIM4_IRQn);
   }
 }
 
-void HAL_TIM_MspPostInit(TIM_HandleTypeDef* timHandle) {
+void HAL_TIM_MspPostInit(TIM_HandleTypeDef* htim) {
   GPIO_InitTypeDef gpio_init;
-  if (timHandle->Instance == TIM3) {
+  if (htim->Instance == TIM3) {
     __HAL_RCC_GPIOA_CLK_ENABLE();
     gpio_init = (GPIO_InitTypeDef){
       .Pin = VGA_HSYNC_Pin,
@@ -151,7 +198,7 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef* timHandle) {
       .Alternate = GPIO_AF2_TIM3,
     };
     HAL_GPIO_Init(VGA_HSYNC_GPIO_Port, &gpio_init);
-  } else if (timHandle->Instance == TIM4) {
+  } else if (htim->Instance == TIM4) {
     __HAL_RCC_GPIOB_CLK_ENABLE();
     gpio_init = (GPIO_InitTypeDef){
       .Pin = VGA_VSYNC_Pin,
@@ -164,13 +211,16 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef* timHandle) {
   }
 }
 
-void HAL_TIM_Base_MspDeInit(TIM_HandleTypeDef* tim_baseHandle) {
-  if (tim_baseHandle->Instance == TIM2) {
+void HAL_TIM_Base_MspDeInit(TIM_HandleTypeDef* htim) {
+  if (htim->Instance == TIM1) {
+    __HAL_RCC_TIM1_CLK_DISABLE();
+    HAL_DMA_DeInit(htim->hdma[TIM_DMA_ID_UPDATE]);
+  } else if (htim->Instance == TIM2) {
     __HAL_RCC_TIM2_CLK_DISABLE();
-  } else if (tim_baseHandle->Instance == TIM3) {
+  } else if (htim->Instance == TIM3) {
     __HAL_RCC_TIM3_CLK_DISABLE();
     HAL_NVIC_DisableIRQ(TIM3_IRQn);
-  } else if (tim_baseHandle->Instance == TIM4) {
+  } else if (htim->Instance == TIM4) {
     __HAL_RCC_TIM4_CLK_DISABLE();
     HAL_NVIC_DisableIRQ(TIM4_IRQn);
   }

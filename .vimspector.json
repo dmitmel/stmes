@@ -21,20 +21,10 @@
         "targetArchitecture": "arm",
 
         "debugServerPath": "openocd",
-        "debugServerArgs": "-c \"gdb_port ${port}; tcl_port disabled; telnet_port disabled\" -f interface/stlink.cfg -c \"transport select hla_swd\" -f target/stm32f4x.cfg -c \"$$_TARGETNAME configure -event gdb-detach { resume } \"",
+        "debugServerArgs": "-c \"gdb_port ${port}; tcl_port disabled; telnet_port disabled\" -f interface/stlink.cfg -c \"transport select hla_swd\" -f target/stm32f4x.cfg -c \"$$_TARGETNAME configure -event gdb-detach { resume }\" -c \"init\" -c \"reset halt\" -c \"arm semihosting enable\"",
         "serverStarted": "Listening on port \\d+ for gdb connections",
         "filterStdout": false,
-        "filterStderr": true,
-
-        "postRemoteConnectCommands": [
-          { "text": "monitor init" },
-          { "text": "load" },
-          { "text": "monitor reset halt" },
-          { "text": "monitor arm semihosting enable" },
-          { "text": "tbreak main" },
-          { "text": "-exec-continue" }
-        ],
-        "launchCompleteCommand": "None"
+        "filterStderr": true
 
         // "logging": {
         //   "exceptions": true,

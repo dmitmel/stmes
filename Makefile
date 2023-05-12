@@ -1,5 +1,5 @@
 PLATFORMIO ?= platformio
-PIO_ENV ?= release
+PIO_ENV ?= debug
 
 -include local.mk
 

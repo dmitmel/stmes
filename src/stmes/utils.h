@@ -22,6 +22,9 @@ typedef double f64;
 
 #define check_hal_error(expr) ((expr) != HAL_OK) ? Error_Handler() : ((void)0)
 
+void fast_memset_u32(u32* dst, u32 val, usize n);
+void fast_memcpy_u8(u8* dst, const u8* src, usize n);
+
 #ifdef __cplusplus
 }
 #endif
