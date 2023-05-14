@@ -1,14 +1,14 @@
 #include "stmes/main.h"
 #include "stmes/dma.h"
 #include "stmes/gpio.h"
+#include "stmes/sdio.h"
 #include "stmes/timers.h"
 #include "stmes/utils.h"
+#include <ff.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stm32f4xx_hal.h>
 #include <string.h>
-
-#include "video_data.h"
 
 static const struct VgaTiming VGA_TIMING_640x480_60hz = {
   .pixel_freq_hz = 25175000,
@@ -72,6 +72,9 @@ int main(void) {
   MX_TIM2_Init();
   MX_TIM3_Init();
   MX_TIM4_Init();
+  MX_SDIO_SD_Init();
+
+  check_hal_error(BSP_SD_Init());
 
   check_hal_error(HAL_TIM_Base_Start(&htim2));
 
@@ -84,6 +87,14 @@ int main(void) {
   check_hal_error(HAL_TIM_OC_Start_IT(&htim3, TIM_CHANNEL_3));
   check_hal_error(HAL_TIM_Base_Start(&htim3));
 
+  static FATFS SDFatFS;
+  static FIL SDFile;
+
+  FRESULT fres;
+  if ((fres = f_mount(&SDFatFS, "", 1)) != FR_OK) {
+    Error_Handler();
+  }
+
   const struct __PACKED video_header {
     u16 width;
     u16 height;
@@ -95,27 +106,16 @@ int main(void) {
   const u32* video_frame_offsets = NULL;
   const u8* video_deltas = NULL;
   const u8* video_pixels = NULL;
-
-  usize video_ptr = (usize)video_bin_data;
-  video_header = (const void*)video_ptr;
-  video_ptr += sizeof(*video_header);
-  video_frame_offsets = (const void*)video_ptr;
-  video_ptr += sizeof(*video_frame_offsets) * video_header->frame_offsets_len;
-  video_deltas = (const void*)video_ptr;
-  video_ptr += sizeof(*video_deltas) * video_header->deltas_len;
-  video_pixels = (const void*)video_ptr;
-  video_ptr += sizeof(*video_pixels) * video_header->pixels_len;
-  u16 video_width = video_header->width;
-  u16 video_height = video_header->height;
-  u32 frames_count = video_header->frames_count;
+  u16 video_width = 0, video_height = 0;
+  u32 frames_count = 0;
 
   struct frame_row {
     u8* data;
-    u32 len, cap;
+    u16 len, cap;
   }* frame_rows = NULL;
 
-  frame_rows = malloc(sizeof(*frame_rows) * video_height);
-  for (u32 y = 0; y < video_height; y++) {
+  frame_rows = malloc(sizeof(*frame_rows) * FRAME_HEIGHT);
+  for (u32 y = 0; y < FRAME_HEIGHT; y++) {
     struct frame_row* row = &frame_rows[y];
     row->len = 0;
     row->cap = 8;
@@ -131,6 +131,11 @@ int main(void) {
   // Wait a bit for the display to initialize
   HAL_Delay(500);
 
+  usize video_file_buf_cap = 96 * 1024;
+  u8* video_file_buf = malloc(video_file_buf_cap);
+  usize video_file_len = 0;
+  u32 batch_nr = 0;
+
   while (true) {
     if (next_frame_request) {
       next_frame_request = false;
@@ -139,6 +144,44 @@ int main(void) {
         frame_nr = 0;
         next_row_offset = 0;
         prev_row_offset = 0;
+
+        char fname[32] = "";
+        while (true) {
+          batch_nr += 1;
+          snprintf(fname, sizeof(fname), "apple/%04" PRIu32 ".bin", batch_nr);
+          fres = f_open(&SDFile, fname, FA_READ);
+          if (fres == FR_OK) {
+            break;
+          } else if (fres == FR_NO_FILE) {
+            batch_nr = 0;
+          } else {
+            Error_Handler();
+          }
+        }
+
+        video_file_len = f_size(&SDFile);
+        if (video_file_len > video_file_buf_cap) {
+          Error_Handler();
+        }
+        if ((fres = f_read(&SDFile, video_file_buf, video_file_len, NULL)) != FR_OK) {
+          Error_Handler();
+        }
+        if ((fres = f_close(&SDFile)) != FR_OK) {
+          Error_Handler();
+        }
+
+        usize video_ptr = (usize)video_file_buf;
+        video_header = (const void*)video_ptr;
+        video_ptr += sizeof(*video_header);
+        video_frame_offsets = (const void*)video_ptr;
+        video_ptr += sizeof(*video_frame_offsets) * video_header->frame_offsets_len;
+        video_deltas = (const void*)video_ptr;
+        video_ptr += sizeof(*video_deltas) * video_header->deltas_len;
+        video_pixels = (const void*)video_ptr;
+        video_ptr += sizeof(*video_pixels) * video_header->pixels_len;
+        video_width = video_header->width;
+        video_height = video_header->height;
+        frames_count = video_header->frames_count;
       }
 
       u32 prev_row_y = -1;
@@ -204,7 +247,7 @@ int main(void) {
     if (line_paint_request) {
       line_paint_request = false;
 
-      const int PIXEL_SCALE = 2;
+      const int PIXEL_SCALE = 1;
       u32 vga_row = __HAL_TIM_GET_COUNTER(&htim4) - 33;
       u32 video_y = (vga_row - (FRAME_HEIGHT - video_height * PIXEL_SCALE) / 2) / PIXEL_SCALE;
       if (video_y < video_height) {

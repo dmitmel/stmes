@@ -187,10 +187,9 @@ void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* htim) {
 }
 
 void HAL_TIM_MspPostInit(TIM_HandleTypeDef* htim) {
-  GPIO_InitTypeDef gpio_init;
   if (htim->Instance == TIM3) {
     __HAL_RCC_GPIOA_CLK_ENABLE();
-    gpio_init = (GPIO_InitTypeDef){
+    GPIO_InitTypeDef gpio_init = {
       .Pin = VGA_HSYNC_Pin,
       .Mode = GPIO_MODE_AF_PP,
       .Pull = GPIO_NOPULL,
@@ -200,7 +199,7 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef* htim) {
     HAL_GPIO_Init(VGA_HSYNC_GPIO_Port, &gpio_init);
   } else if (htim->Instance == TIM4) {
     __HAL_RCC_GPIOB_CLK_ENABLE();
-    gpio_init = (GPIO_InitTypeDef){
+    GPIO_InitTypeDef gpio_init = {
       .Pin = VGA_VSYNC_Pin,
       .Mode = GPIO_MODE_AF_PP,
       .Pull = GPIO_NOPULL,

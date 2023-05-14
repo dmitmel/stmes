@@ -19,9 +19,9 @@ def rle_encode(row: list[int]):
 
 
 FRAME_COUNT = 6572
-IMAGE_WIDTH = 240
-IMAGE_HEIGHT = 180
-FILE_SIZE_LIMIT = 480 * 1024
+IMAGE_WIDTH = 480
+IMAGE_HEIGHT = 360
+FILE_SIZE_LIMIT = 92 * 1024
 WHITE_THRESHOLD = 200
 
 frame_idx = 0
@@ -108,7 +108,7 @@ while frame_idx < FRAME_COUNT:
   frame_offsets.append(len(encoded_frames))
 
   batch_idx += 1
-  with open(f"apple/encoded/{batch_idx:04d}.c", "w") as out:
+  with open(f"apple/encoded/{batch_idx:04d}.bin", "wb") as out:
     bin_data = struct.pack(
       pack_format(),
       IMAGE_WIDTH,
@@ -121,14 +121,5 @@ while frame_idx < FRAME_COUNT:
       *encoded_frames,
       *encoded,
     )
-    out.write('#include "stmes/video_data.h"\n')
-    out.write("const usize video_bin_data_len = {};\n".format(len(bin_data)))
-    out.write("const u8 video_bin_data[] = {\n")
-    PAGE_SIZE = 32
-    for i in range(0, len(bin_data), PAGE_SIZE):
-      out.write(",".join(map(str, bin_data[i:i + PAGE_SIZE])))
-      if i + PAGE_SIZE < len(bin_data):
-        out.write(",")
-      out.write("\n")
-    out.write("};\n")
+    out.write(bin_data)
     out.flush()
