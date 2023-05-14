@@ -1,5 +1,7 @@
 #include "stmes/sdio.h"
+#include "stmes/dma.h"
 #include "stmes/gpio.h"
+#include "stmes/main.h"
 #include "stmes/utils.h"
 #include <stm32f4xx_hal.h>
 
@@ -12,11 +14,10 @@ void MX_SDIO_SD_Init(void) {
     .ClockEdge = SDIO_CLOCK_EDGE_RISING,
     .ClockBypass = SDIO_CLOCK_BYPASS_DISABLE,
     .ClockPowerSave = SDIO_CLOCK_POWER_SAVE_DISABLE,
-    // .BusWide = SDIO_BUS_WIDE_4B,
     .BusWide = SDIO_BUS_WIDE_1B,
     // NOTE: Enabling HW flow control may cause data corruption, see the errata.
     .HardwareFlowControl = SDIO_HARDWARE_FLOW_CONTROL_DISABLE,
-    .ClockDiv = 0,
+    .ClockDiv = SDIO_INIT_CLK_DIV,
   };
 }
 
@@ -40,6 +41,45 @@ void HAL_SD_MspInit(SD_HandleTypeDef* hsd) {
     HAL_GPIO_Init(GPIOA, &gpio_init);
     gpio_init.Pin = SDIO_D0_Pin | SDIO_D3_Pin;
     HAL_GPIO_Init(GPIOB, &gpio_init);
+
+    hdma_sdio_rx.Instance = DMA2_Stream3;
+    hdma_sdio_rx.Init = (DMA_InitTypeDef){
+      .Channel = DMA_CHANNEL_4,
+      .Direction = DMA_PERIPH_TO_MEMORY,
+      .PeriphInc = DMA_PINC_DISABLE,
+      .MemInc = DMA_MINC_ENABLE,
+      .PeriphDataAlignment = DMA_PDATAALIGN_WORD,
+      .MemDataAlignment = DMA_MDATAALIGN_WORD,
+      .Mode = DMA_PFCTRL,
+      .Priority = DMA_PRIORITY_MEDIUM,
+      .FIFOMode = DMA_FIFOMODE_ENABLE,
+      .FIFOThreshold = DMA_FIFO_THRESHOLD_FULL,
+      .MemBurst = DMA_MBURST_INC4,
+      .PeriphBurst = DMA_PBURST_INC4,
+    };
+    check_hal_error(HAL_DMA_Init(&hdma_sdio_rx));
+    __HAL_LINKDMA(hsd, hdmarx, hdma_sdio_rx);
+
+    hdma_sdio_tx.Instance = DMA2_Stream6;
+    hdma_sdio_tx.Init = (DMA_InitTypeDef){
+      .Channel = DMA_CHANNEL_4,
+      .Direction = DMA_MEMORY_TO_PERIPH,
+      .PeriphInc = DMA_PINC_DISABLE,
+      .MemInc = DMA_MINC_ENABLE,
+      .PeriphDataAlignment = DMA_PDATAALIGN_WORD,
+      .MemDataAlignment = DMA_MDATAALIGN_WORD,
+      .Mode = DMA_PFCTRL,
+      .Priority = DMA_PRIORITY_MEDIUM,
+      .FIFOMode = DMA_FIFOMODE_ENABLE,
+      .FIFOThreshold = DMA_FIFO_THRESHOLD_FULL,
+      .MemBurst = DMA_MBURST_INC4,
+      .PeriphBurst = DMA_PBURST_INC4,
+    };
+    check_hal_error(HAL_DMA_Init(&hdma_sdio_tx));
+    __HAL_LINKDMA(hsd, hdmatx, hdma_sdio_tx);
+
+    HAL_NVIC_SetPriority(SDIO_IRQn, 4, 0);
+    HAL_NVIC_EnableIRQ(SDIO_IRQn);
   }
 }
 
@@ -55,15 +95,29 @@ HAL_StatusTypeDef BSP_SD_Init(void) {
   if (!BSP_SD_IsDetected()) {
     return HAL_ERROR;
   }
-  if (HAL_SD_Init(&hsd) != HAL_OK) {
-    return HAL_ERROR;
+
+  HAL_StatusTypeDef error = HAL_OK;
+  // <https://community.st.com/s/question/0D53W00000MgkxxSAB/code-stuck-in-sdfindscr-function>
+  // <https://community.st.com/s/question/0D50X0000AeY5nHSQS/stm32l4-sd-stm32cubemx-v500-sd-clock-speed-during-call-to-sdmmccmdsendscr-as-part-of-switch-to-4bit-bus-is-too-fast-for-many-sd-cards>
+
+  hsd.Init.BusWide = SDIO_BUS_WIDE_1B;
+  hsd.Init.ClockDiv = SDIO_INIT_CLK_DIV;
+  hsd.Init.ClockBypass = SDIO_CLOCK_BYPASS_DISABLE;
+  if ((error = HAL_SD_Init(&hsd)) != HAL_OK) {
+    return error;
   }
-  // if (HAL_SD_ConfigWideBusOperation(&hsd, SDIO_BUS_WIDE_4B) != HAL_OK) {
-  //   return HAL_ERROR;
-  // }
+
+  hsd.Init.BusWide = SDIO_BUS_WIDE_4B;
+  hsd.Init.ClockDiv = SDIO_TRANSFER_CLK_DIV;
+  // My board isn't fast enough for this, unfortunately.
+  // hsd.Init.ClockBypass = SDIO_CLOCK_BYPASS_ENABLE;
+  if ((error = HAL_SD_ConfigWideBusOperation(&hsd, hsd.Init.BusWide)) != HAL_OK) {
+    return error;
+  }
+
   return HAL_OK;
 }
 
 bool BSP_SD_IsDetected(void) {
-  return HAL_GPIO_ReadPin(SDIO_CD_GPIO_Port, SDIO_CD_Pin) == GPIO_PIN_RESET;
+  return HAL_GPIO_ReadPin(SDIO_CD_GPIO_Port, SDIO_CD_Pin) == GPIO_PIN_SET;
 }

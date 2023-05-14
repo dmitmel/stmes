@@ -1,5 +1,6 @@
 #include "stmes/interrupts.h"
 #include "stmes/dma.h"
+#include "stmes/sdio.h"
 #include "stmes/timers.h"
 #include "stmes/utils.h"
 #include <stm32f4xx_hal.h>
@@ -34,8 +35,20 @@ void SysTick_Handler(void) {
   HAL_IncTick();
 }
 
+void SDIO_IRQHandler(void) {
+  HAL_SD_IRQHandler(&hsd);
+}
+
+void DMA2_Stream3_IRQHandler(void) {
+  HAL_DMA_IRQHandler(&hdma_sdio_rx);
+}
+
 void DMA2_Stream5_IRQHandler(void) {
   HAL_DMA_IRQHandler(&hdma_tim1_up);
+}
+
+void DMA2_Stream6_IRQHandler(void) {
+  HAL_DMA_IRQHandler(&hdma_sdio_tx);
 }
 
 void TIM2_IRQHandler(void) {

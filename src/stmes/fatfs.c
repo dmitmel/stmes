@@ -1,4 +1,5 @@
 #include "stmes/sdio.h"
+#include "stmes/utils.h"
 #include <ff.h>
 #include <stm32f4xx_hal.h>
 
@@ -7,9 +8,32 @@
 #define SD_TIMEOUT 30 * 1000
 #define SD_DEFAULT_BLOCK_SIZE 512
 
-static volatile DSTATUS sd_status = STA_NOINIT;
+__ALIGN_BEGIN static u8 dma_scratch[BLOCKSIZE] __ALIGN_END;
 
-static DSTATUS SD_CheckStatus(void) {
+static volatile DSTATUS sd_status = STA_NOINIT;
+static volatile bool sd_write_done = false, sd_read_done = false;
+
+static HAL_StatusTypeDef sd_check_status_with_timeout(u32 timeout) {
+  u32 start_time = HAL_GetTick();
+  do {
+    if (HAL_SD_GetCardState(&hsd) == HAL_SD_CARD_TRANSFER) {
+      return HAL_OK;
+    }
+  } while (HAL_GetTick() - start_time < timeout);
+  return HAL_TIMEOUT;
+}
+
+static HAL_StatusTypeDef sd_wait_until_flag_set(volatile bool* flag, u32 timeout) {
+  u32 start_time = HAL_GetTick();
+  do {
+    if (*flag != false) {
+      return HAL_OK;
+    }
+  } while (HAL_GetTick() - start_time < timeout);
+  return HAL_TIMEOUT;
+}
+
+static DSTATUS sd_check_status(void) {
   sd_status = STA_NOINIT;
   if (HAL_SD_GetCardState(&hsd) == HAL_SD_CARD_TRANSFER) {
     sd_status &= ~STA_NOINIT;
@@ -21,32 +45,90 @@ DSTATUS disk_initialize(BYTE pdrv) {
   UNUSED(pdrv);
   sd_status = STA_NOINIT;
   if (BSP_SD_Init() == HAL_OK) {
-    sd_status = SD_CheckStatus();
+    sd_status = sd_check_status();
   }
   return sd_status;
 }
 
 DSTATUS disk_status(BYTE pdrv) {
   UNUSED(pdrv);
-  return SD_CheckStatus();
+  return sd_check_status();
 }
 
 DRESULT disk_read(BYTE pdrv, BYTE* buff, DWORD sector, UINT count) {
   UNUSED(pdrv);
-  if (HAL_SD_ReadBlocks(&hsd, buff, (uint32_t)sector, count, SD_TIMEOUT) == HAL_OK) {
-    while (HAL_SD_GetCardState(&hsd) != HAL_SD_CARD_TRANSFER) {}
+  if (sd_check_status_with_timeout(SD_TIMEOUT) != HAL_OK) {
+    return RES_ERROR;
+  }
+
+  // Take the fast path if the output buffer is 4-byte aligned
+  if ((usize)buff % 4 == 0) {
+    sd_read_done = false;
+    if (HAL_SD_ReadBlocks_DMA(&hsd, buff, sector, count) != HAL_OK) {
+      return RES_ERROR;
+    }
+    if (sd_wait_until_flag_set(&sd_read_done, SD_TIMEOUT) != HAL_OK) {
+      return RES_ERROR;
+    }
+    sd_read_done = false;
+    if (sd_check_status_with_timeout(SD_TIMEOUT) != HAL_OK) {
+      return RES_ERROR;
+    }
     return RES_OK;
   }
-  return RES_ERROR;
+
+  // Otherwise, fetch each sector to an aligned buffer and copy it to the destination
+  for (UINT last = sector + count; sector < last; sector++) {
+    sd_read_done = false;
+    if (HAL_SD_ReadBlocks_DMA(&hsd, dma_scratch, sector, 1) != HAL_OK) {
+      return RES_ERROR;
+    }
+    if (sd_wait_until_flag_set(&sd_read_done, SD_TIMEOUT) != HAL_OK) {
+      return RES_ERROR;
+    }
+    sd_read_done = false;
+    fast_memcpy_u8(buff, dma_scratch, BLOCKSIZE);
+    buff += BLOCKSIZE;
+  }
+  return RES_OK;
 }
 
 DRESULT disk_write(BYTE pdrv, const BYTE* buff, DWORD sector, UINT count) {
   UNUSED(pdrv);
-  if (HAL_SD_WriteBlocks(&hsd, (BYTE*)buff, (uint32_t)sector, count, SD_TIMEOUT) == HAL_OK) {
-    while (HAL_SD_GetCardState(&hsd) != HAL_SD_CARD_TRANSFER) {}
+  if (sd_check_status_with_timeout(SD_TIMEOUT) != HAL_OK) {
+    return RES_ERROR;
+  }
+
+  // Take the fast path if the output buffer is 4-byte aligned
+  if ((usize)buff % 4 == 0) {
+    sd_write_done = false;
+    if (HAL_SD_WriteBlocks_DMA(&hsd, (BYTE*)buff, sector, count) != HAL_OK) {
+      return RES_ERROR;
+    }
+    if (sd_wait_until_flag_set(&sd_write_done, SD_TIMEOUT) != HAL_OK) {
+      return RES_ERROR;
+    }
+    sd_write_done = false;
+    if (sd_check_status_with_timeout(SD_TIMEOUT) != HAL_OK) {
+      return RES_ERROR;
+    }
     return RES_OK;
   }
-  return RES_ERROR;
+
+  // Otherwise, copy each sector to an aligned buffer and write it
+  for (UINT last = sector + count; sector < last; sector++) {
+    fast_memcpy_u8(dma_scratch, buff, BLOCKSIZE);
+    buff += BLOCKSIZE;
+    sd_write_done = false;
+    if (HAL_SD_WriteBlocks_DMA(&hsd, (BYTE*)dma_scratch, sector, 1) != HAL_OK) {
+      return RES_ERROR;
+    }
+    if (sd_wait_until_flag_set(&sd_write_done, SD_TIMEOUT) != HAL_OK) {
+      return RES_ERROR;
+    }
+    sd_write_done = false;
+  }
+  return RES_OK;
 }
 
 DRESULT disk_ioctl(BYTE pdrv, BYTE cmd, void* buff) {
@@ -84,10 +166,12 @@ DWORD get_fattime(void) {
 
 void HAL_SD_TxCpltCallback(SD_HandleTypeDef* hsd) {
   UNUSED(hsd);
+  sd_write_done = true;
 }
 
 void HAL_SD_RxCpltCallback(SD_HandleTypeDef* hsd) {
   UNUSED(hsd);
+  sd_read_done = true;
 }
 
 void HAL_SD_AbortCallback(SD_HandleTypeDef* hsd) {

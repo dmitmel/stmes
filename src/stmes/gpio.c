@@ -15,7 +15,7 @@ void MX_GPIO_Init(void) {
   gpio_init = (GPIO_InitTypeDef){
     .Pin = BLTN_KEY_Pin,
     .Mode = GPIO_MODE_INPUT,
-    .Pull = GPIO_NOPULL,
+    .Pull = GPIO_PULLUP,
   };
   HAL_GPIO_Init(BLTN_KEY_GPIO_Port, &gpio_init);
 
@@ -30,7 +30,7 @@ void MX_GPIO_Init(void) {
   gpio_init = (GPIO_InitTypeDef){
     .Pin = SDIO_CD_Pin,
     .Mode = GPIO_MODE_INPUT,
-    .Pull = GPIO_NOPULL,
+    .Pull = GPIO_PULLUP,
   };
   HAL_GPIO_Init(SDIO_CD_GPIO_Port, &gpio_init);
 
