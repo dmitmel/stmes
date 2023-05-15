@@ -21,7 +21,7 @@ def rle_encode(row: list[int]):
 FRAME_COUNT = 6572
 IMAGE_WIDTH = 480
 IMAGE_HEIGHT = 360
-FILE_SIZE_LIMIT = 92 * 1024
+FILE_SIZE_LIMIT = 4 * 1024 * 1024 * 1024
 WHITE_THRESHOLD = 200
 
 frame_idx = 0
@@ -29,16 +29,14 @@ batch_idx = 0
 while frame_idx < FRAME_COUNT:
   encoded = []
   encoded_frames = []
-  frame_offsets = []
+  frame_lengths = []
 
   batch_frame_idx = 0
   prev_frame_rows = []
 
-  pack_format = lambda: f"<HHIIII{len(frame_offsets)}I{len(encoded_frames)}B{len(encoded)}B"
+  pack_format = lambda: f"<HHIII{len(frame_lengths)}H{len(encoded_frames)}B{len(encoded)}B"
 
-  duplicate_rows = {}
-  next_row_offset = 0
-  prev_row_offset = 0
+  prev_row = None
 
   while frame_idx < FRAME_COUNT and struct.calcsize(pack_format()) <= FILE_SIZE_LIMIT:
     frame_idx += 1
@@ -53,59 +51,80 @@ while frame_idx < FRAME_COUNT:
 
     while len(prev_frame_rows) < height:
       prev_frame_rows.append([])
-    frame_offsets.append(len(encoded_frames))
+    frame_start = len(encoded_frames)
 
-    FLAG_CONTIGUOUS_OFFSET = 0x01
-    FLAG_UNCHANGED_OFFSET = 0x02
+    FLAG_REPEAT_PREVIOUS = 0x01
+    FLAG_DUPLICATE_ROW = 0x02
     FLAG_NO_COMMON_PIXELS = 0x04
     FLAG_INCREMENT_Y = 0x08
     FLAG_COMPACT_ROW_LENGTH = 0x10
 
+    prev_delta = None
+    prev_delta_idx = 0
+    prev_delta_repeats_idx = 0
+
     prev_row_y = -1
     for y in range(height):
-      row = tuple(rle_encode(img_data[y * width:(y + 1) * width]))
+      row = list(rle_encode(img_data[y * width:(y + 1) * width]))
       if len(row) >= 0x100:
         raise AssertionError()
 
-      prev_row = prev_frame_rows[y]
-      if prev_row == row:
+      prev_frame_row = prev_frame_rows[y]
+      if prev_frame_row == row:
         continue
       prev_frame_rows[y] = row
 
       common = 0
-      offset = duplicate_rows.get(row, None)
-      if offset is None:
-        for a, b in zip(prev_row, row):
-          if a != b:
-            break
-          common += 1
-        row = row[common:]
-        offset = len(encoded)
-        encoded.extend(row)
-        duplicate_rows[row] = offset
+      for a, b in zip(prev_frame_row, row):
+        if a != b:
+          break
+        common += 1
+      row = row[common:]
 
       flags = 0
-      flags |= FLAG_CONTIGUOUS_OFFSET if offset == next_row_offset else 0
-      flags |= FLAG_UNCHANGED_OFFSET if offset == prev_row_offset else 0
+      flags |= FLAG_DUPLICATE_ROW if row == prev_row else 0
       flags |= FLAG_NO_COMMON_PIXELS if common == 0 else 0
       flags |= FLAG_INCREMENT_Y if y == prev_row_y + 1 else 0
       flags |= FLAG_COMPACT_ROW_LENGTH | (len(row) - 1) << 5 if 1 <= len(row) <= 8 else 0
 
-      encoded_frames.append(flags)
+      delta = []
+      delta.append(flags)
       if not flags & FLAG_INCREMENT_Y:
-        encoded_frames.extend(struct.pack("<H", y))
+        delta.extend(struct.pack("<H", y))
       if not flags & FLAG_NO_COMMON_PIXELS:
-        encoded_frames.append(common)
+        delta.append(common)
       if not flags & FLAG_COMPACT_ROW_LENGTH:
-        encoded_frames.append(len(row))
-      if not flags & FLAG_CONTIGUOUS_OFFSET and not flags & FLAG_UNCHANGED_OFFSET:
-        encoded_frames.extend(struct.pack("<I", offset))
+        delta.append(len(row))
 
-      next_row_offset = offset + len(row)
-      prev_row_offset = offset
+      if prev_delta == delta:
+        flush_delta = False
+        if prev_delta_repeats_idx is None:
+          encoded_frames[prev_delta_idx] |= FLAG_REPEAT_PREVIOUS
+          prev_delta_repeats_idx = len(encoded_frames)
+          encoded_frames.append(0)
+        elif encoded_frames[prev_delta_repeats_idx] >= 0xff:
+          flush_delta = True
+        else:
+          encoded_frames[prev_delta_repeats_idx] += 1
+      else:
+        flush_delta = True
+
+      if flush_delta:
+        prev_delta = delta
+        prev_delta_idx = len(encoded_frames)
+        prev_delta_repeats_idx = None
+        encoded_frames.extend(delta)
+
+      if not flags & FLAG_DUPLICATE_ROW:
+        encoded.extend(row)
+
+      prev_row = row
       prev_row_y = y
 
-  frame_offsets.append(len(encoded_frames))
+    frame_len = len(encoded_frames) - frame_start
+    if frame_len >= 0x10000:
+      raise AssertionError()
+    frame_lengths.append(frame_len)
 
   batch_idx += 1
   with open(f"apple/encoded/{batch_idx:04d}.bin", "wb") as out:
@@ -113,11 +132,10 @@ while frame_idx < FRAME_COUNT:
       pack_format(),
       IMAGE_WIDTH,
       IMAGE_HEIGHT,
-      batch_frame_idx,
-      len(frame_offsets),
+      len(frame_lengths),
       len(encoded_frames),
       len(encoded),
-      *frame_offsets,
+      *frame_lengths,
       *encoded_frames,
       *encoded,
     )

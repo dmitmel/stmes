@@ -13,10 +13,10 @@ __ALIGN_BEGIN static u8 dma_scratch[BLOCKSIZE] __ALIGN_END;
 static volatile DSTATUS sd_status = STA_NOINIT;
 static volatile bool sd_write_done = false, sd_read_done = false;
 
-static HAL_StatusTypeDef sd_check_status_with_timeout(u32 timeout) {
+static HAL_StatusTypeDef sd_wait_for_card_state(HAL_SD_CardStateTypedef state, u32 timeout) {
   u32 start_time = HAL_GetTick();
   do {
-    if (HAL_SD_GetCardState(&hsd) == HAL_SD_CARD_TRANSFER) {
+    if (HAL_SD_GetCardState(&hsd) == state) {
       return HAL_OK;
     }
   } while (HAL_GetTick() - start_time < timeout);
@@ -57,7 +57,7 @@ DSTATUS disk_status(BYTE pdrv) {
 
 DRESULT disk_read(BYTE pdrv, BYTE* buff, DWORD sector, UINT count) {
   UNUSED(pdrv);
-  if (sd_check_status_with_timeout(SD_TIMEOUT) != HAL_OK) {
+  if (sd_wait_for_card_state(HAL_SD_CARD_TRANSFER, SD_TIMEOUT) != HAL_OK) {
     return RES_ERROR;
   }
 
@@ -71,7 +71,7 @@ DRESULT disk_read(BYTE pdrv, BYTE* buff, DWORD sector, UINT count) {
       return RES_ERROR;
     }
     sd_read_done = false;
-    if (sd_check_status_with_timeout(SD_TIMEOUT) != HAL_OK) {
+    if (sd_wait_for_card_state(HAL_SD_CARD_TRANSFER, SD_TIMEOUT) != HAL_OK) {
       return RES_ERROR;
     }
     return RES_OK;
@@ -95,7 +95,7 @@ DRESULT disk_read(BYTE pdrv, BYTE* buff, DWORD sector, UINT count) {
 
 DRESULT disk_write(BYTE pdrv, const BYTE* buff, DWORD sector, UINT count) {
   UNUSED(pdrv);
-  if (sd_check_status_with_timeout(SD_TIMEOUT) != HAL_OK) {
+  if (sd_wait_for_card_state(HAL_SD_CARD_TRANSFER, SD_TIMEOUT) != HAL_OK) {
     return RES_ERROR;
   }
 
@@ -109,7 +109,7 @@ DRESULT disk_write(BYTE pdrv, const BYTE* buff, DWORD sector, UINT count) {
       return RES_ERROR;
     }
     sd_write_done = false;
-    if (sd_check_status_with_timeout(SD_TIMEOUT) != HAL_OK) {
+    if (sd_wait_for_card_state(HAL_SD_CARD_TRANSFER, SD_TIMEOUT) != HAL_OK) {
       return RES_ERROR;
     }
     return RES_OK;
@@ -120,7 +120,7 @@ DRESULT disk_write(BYTE pdrv, const BYTE* buff, DWORD sector, UINT count) {
     fast_memcpy_u8(dma_scratch, buff, BLOCKSIZE);
     buff += BLOCKSIZE;
     sd_write_done = false;
-    if (HAL_SD_WriteBlocks_DMA(&hsd, (BYTE*)dma_scratch, sector, 1) != HAL_OK) {
+    if (HAL_SD_WriteBlocks_DMA(&hsd, dma_scratch, sector, 1) != HAL_OK) {
       return RES_ERROR;
     }
     if (sd_wait_until_flag_set(&sd_write_done, SD_TIMEOUT) != HAL_OK) {
@@ -134,24 +134,30 @@ DRESULT disk_write(BYTE pdrv, const BYTE* buff, DWORD sector, UINT count) {
 DRESULT disk_ioctl(BYTE pdrv, BYTE cmd, void* buff) {
   UNUSED(pdrv);
   if (sd_status & STA_NOINIT) return RES_NOTRDY;
-  HAL_SD_CardInfoTypeDef CardInfo;
   switch (cmd) {
     case CTRL_SYNC: {
+      if (sd_wait_for_card_state(HAL_SD_CARD_TRANSFER, SD_TIMEOUT) != HAL_OK) {
+        return RES_ERROR;
+      }
       return RES_OK;
     }
     case GET_SECTOR_COUNT: {
-      HAL_SD_GetCardInfo(&hsd, &CardInfo);
-      *(DWORD*)buff = CardInfo.LogBlockNbr;
+      *(DWORD*)buff = hsd.SdCard.LogBlockNbr;
       return RES_OK;
     }
     case GET_SECTOR_SIZE: {
-      HAL_SD_GetCardInfo(&hsd, &CardInfo);
-      *(WORD*)buff = CardInfo.LogBlockSize;
+      *(WORD*)buff = hsd.SdCard.LogBlockSize;
       return RES_OK;
     }
     case GET_BLOCK_SIZE: {
-      HAL_SD_GetCardInfo(&hsd, &CardInfo);
-      *(DWORD*)buff = CardInfo.LogBlockSize / SD_DEFAULT_BLOCK_SIZE;
+      *(DWORD*)buff = hsd.SdCard.LogBlockSize / SD_DEFAULT_BLOCK_SIZE;
+      return RES_OK;
+    }
+    case CTRL_TRIM: {
+      DWORD start = ((DWORD*)buff)[0], end = ((DWORD*)buff)[1];
+      if (HAL_SD_Erase(&hsd, start, end) != HAL_OK) {
+        return RES_ERROR;
+      }
       return RES_OK;
     }
     default: {

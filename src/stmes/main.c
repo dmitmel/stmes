@@ -55,6 +55,35 @@ static void swap_dma_buffers(void) {
 
 extern void initialise_monitor_handles(void);
 
+#define check_fs_error(expr) ((expr) != FR_OK ? Error_Handler() : (void)0)
+
+struct BufferedReader {
+  u8 buffer[BLOCKSIZE * 8];
+  FSIZE_t offset_start;
+  FSIZE_t offset_end;
+};
+
+static u8* buffered_read(struct BufferedReader* self, FIL* file, FSIZE_t pos, FSIZE_t len) {
+  const FSIZE_t capacity = sizeof(self->buffer) / sizeof(*self->buffer);
+  if (len > capacity) {
+    Error_Handler();
+  }
+  if (!(self->offset_start <= pos && pos + len <= self->offset_end)) {
+    self->offset_start = pos & ~(BLOCKSIZE - 1); // align to 512-byte boundaries
+    self->offset_end = self->offset_start;
+    if (f_tell(file) != self->offset_start) {
+      check_fs_error(f_lseek(file, self->offset_start));
+    }
+    UINT bytes_read;
+    check_fs_error(f_read(file, self->buffer, capacity, &bytes_read));
+    self->offset_end = self->offset_start + bytes_read;
+    if (!(self->offset_start <= pos && pos + len <= self->offset_end)) {
+      Error_Handler();
+    }
+  }
+  return &self->buffer[pos - self->offset_start];
+}
+
 int main(void) {
 #ifdef ARM_SEMIHOSTING_ENABLE
   // Actually enable the semihosting machinery only when the debugger is attached.
@@ -89,32 +118,45 @@ int main(void) {
 
   static FATFS SDFatFS;
   static FIL SDFile;
+  check_fs_error(f_mount(&SDFatFS, "", 1));
+  check_fs_error(f_open(&SDFile, "apple_full.bin", FA_READ));
+  FSIZE_t video_file_len = f_size(&SDFile);
 
-  FRESULT fres;
-  if ((fres = f_mount(&SDFatFS, "", 1)) != FR_OK) {
+  struct __PACKED video_header {
+    u16 width;
+    u16 height;
+    u32 frames_len;
+    u32 deltas_len;
+    u32 pixels_len;
+  } video_header = { 0 };
+  check_fs_error(f_read(&SDFile, &video_header, sizeof(video_header), NULL));
+  u16 video_width = video_header.width;
+  u16 video_height = video_header.height;
+  u32 frames_len = video_header.frames_len;
+
+  FSIZE_t video_ptr = 0;
+  video_ptr += sizeof(video_header);
+  FSIZE_t video_frames_start = video_ptr;
+  FSIZE_t video_frames_size = sizeof(u16) * video_header.frames_len;
+  video_ptr += video_frames_size;
+  FSIZE_t video_deltas_start = video_ptr;
+  FSIZE_t video_deltas_size = sizeof(u8) * video_header.deltas_len;
+  video_ptr += video_deltas_size;
+  FSIZE_t video_pixels_start = video_ptr;
+  FSIZE_t video_pixels_size = sizeof(u8) * video_header.pixels_len;
+  video_ptr += video_pixels_size;
+  if (video_ptr != video_file_len) {
     Error_Handler();
   }
 
-  const struct __PACKED video_header {
-    u16 width;
-    u16 height;
-    u32 frames_count;
-    u32 frame_offsets_len;
-    u32 deltas_len;
-    u32 pixels_len;
-  }* video_header = NULL;
-  const u32* video_frame_offsets = NULL;
-  const u8* video_deltas = NULL;
-  const u8* video_pixels = NULL;
-  u16 video_width = 0, video_height = 0;
-  u32 frames_count = 0;
+  u16* video_frames = malloc(video_frames_size);
+  check_fs_error(f_lseek(&SDFile, video_frames_start));
+  check_fs_error(f_read(&SDFile, video_frames, video_frames_size, NULL));
 
   struct frame_row {
     u8* data;
     u16 len, cap;
-  }* frame_rows = NULL;
-
-  frame_rows = malloc(sizeof(*frame_rows) * FRAME_HEIGHT);
+  } frame_rows[FRAME_HEIGHT];
   for (u32 y = 0; y < FRAME_HEIGHT; y++) {
     struct frame_row* row = &frame_rows[y];
     row->len = 0;
@@ -126,83 +168,48 @@ int main(void) {
   next_frame_request = true;
   line_paint_request = true;
 
-  u32 next_row_offset = 0, prev_row_offset = 0;
+  u32 next_row_offset = 0, prev_row_offset = 0, frame_deltas_offset = 0;
 
   // Wait a bit for the display to initialize
   HAL_Delay(500);
-
-  usize video_file_buf_cap = 96 * 1024;
-  u8* video_file_buf = malloc(video_file_buf_cap);
-  usize video_file_len = 0;
-  u32 batch_nr = 0;
 
   while (true) {
     if (next_frame_request) {
       next_frame_request = false;
 
-      if (frame_nr >= frames_count) {
+      if (frame_nr >= frames_len) {
         frame_nr = 0;
         next_row_offset = 0;
         prev_row_offset = 0;
-
-        char fname[32] = "";
-        while (true) {
-          batch_nr += 1;
-          snprintf(fname, sizeof(fname), "apple/%04" PRIu32 ".bin", batch_nr);
-          fres = f_open(&SDFile, fname, FA_READ);
-          if (fres == FR_OK) {
-            break;
-          } else if (fres == FR_NO_FILE) {
-            batch_nr = 0;
-          } else {
-            Error_Handler();
-          }
-        }
-
-        video_file_len = f_size(&SDFile);
-        if (video_file_len > video_file_buf_cap) {
-          Error_Handler();
-        }
-        if ((fres = f_read(&SDFile, video_file_buf, video_file_len, NULL)) != FR_OK) {
-          Error_Handler();
-        }
-        if ((fres = f_close(&SDFile)) != FR_OK) {
-          Error_Handler();
-        }
-
-        usize video_ptr = (usize)video_file_buf;
-        video_header = (const void*)video_ptr;
-        video_ptr += sizeof(*video_header);
-        video_frame_offsets = (const void*)video_ptr;
-        video_ptr += sizeof(*video_frame_offsets) * video_header->frame_offsets_len;
-        video_deltas = (const void*)video_ptr;
-        video_ptr += sizeof(*video_deltas) * video_header->deltas_len;
-        video_pixels = (const void*)video_ptr;
-        video_ptr += sizeof(*video_pixels) * video_header->pixels_len;
-        video_width = video_header->width;
-        video_height = video_header->height;
-        frames_count = video_header->frames_count;
+        frame_deltas_offset = 0;
       }
 
-      u32 prev_row_y = -1;
-      const u8* deltas_ptr = &video_deltas[video_frame_offsets[frame_nr]];
-      const u8* deltas_end = &video_deltas[video_frame_offsets[frame_nr + 1]];
+      static struct BufferedReader frames_reader;
+      u8* frame_ptr = buffered_read(
+        &frames_reader, &SDFile, video_frames_start + sizeof(u16) * frame_nr, sizeof(u16)
+      );
+      u16 deltas_len = __UNALIGNED_UINT16_READ(frame_ptr);
+
+      static struct BufferedReader deltas_reader;
+      u8* deltas_ptr = buffered_read(
+        &deltas_reader, &SDFile, video_deltas_start + frame_deltas_offset, deltas_len
+      );
+      u8* deltas_end = &deltas_ptr[deltas_len];
+
+      u16 row_y = -1;
       while (deltas_ptr != deltas_end) {
         u8 packed_flags = *deltas_ptr++;
         struct delta_flags {
-          bool contiguous_offset : 1;
-          bool unchanged_offset : 1;
+          bool repeat_previous : 1;
+          bool duplicate_row : 1;
           bool no_common_pixels : 1;
           bool increment_y : 1;
           bool compact_row_length : 1;
           u8 inline_row_length : 3;
         } flags = *(struct delta_flags*)&packed_flags;
 
-        u16 y;
-        if (flags.increment_y) {
-          y = prev_row_y + 1;
-        } else {
-          y = __UNALIGNED_UINT16_READ(deltas_ptr);
+        if (!flags.increment_y) {
+          row_y = __UNALIGNED_UINT16_READ(deltas_ptr);
           deltas_ptr += 2;
         }
 
@@ -218,30 +225,42 @@ int main(void) {
           row_len = *deltas_ptr++;
         }
 
-        u32 row_offset;
-        if (flags.contiguous_offset) {
-          row_offset = next_row_offset;
-        } else if (flags.unchanged_offset) {
-          row_offset = prev_row_offset;
-        } else {
-          row_offset = __UNALIGNED_UINT32_READ(deltas_ptr);
-          deltas_ptr += 4;
+        u16 repeats = 1;
+        if (flags.repeat_previous) {
+          repeats = 2 + *deltas_ptr++;
         }
 
-        next_row_offset = row_offset + row_len;
-        prev_row_offset = row_offset;
-        prev_row_y = y;
+        for (u16 i = 0; i < repeats; i++) {
+          if (flags.increment_y) {
+            row_y += 1;
+          }
 
-        struct frame_row* row = &frame_rows[y];
-        row->len = common + row_len;
-        if (row->cap < row->len) {
-          row->data = realloc(row->data, sizeof(*row->data) * row->len);
-          row->cap = row->len;
+          u32 row_offset;
+          if (flags.duplicate_row) {
+            row_offset = prev_row_offset;
+          } else {
+            row_offset = next_row_offset;
+          }
+
+          struct frame_row* row = &frame_rows[row_y];
+          row->len = common + row_len;
+          if (row->cap < row->len) {
+            row->data = realloc(row->data, sizeof(*row->data) * row->len);
+            row->cap = row->len;
+          }
+
+          static struct BufferedReader pixels_reader;
+          u8* row_pixels =
+            buffered_read(&pixels_reader, &SDFile, video_pixels_start + row_offset, row_len);
+          fast_memcpy_u8(row->data + common, row_pixels, row_len);
+
+          next_row_offset = row_offset + row_len;
+          prev_row_offset = row_offset;
         }
-        fast_memcpy_u8(row->data + common, video_pixels + row_offset, row_len);
       }
 
       frame_nr += 1;
+      frame_deltas_offset += deltas_len;
     }
 
     if (line_paint_request) {
@@ -292,6 +311,10 @@ void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef* htim) {
   } else if (htim->Instance == TIM4) {
     if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_2) {
       inside_frame = false;
+      frame_counter++;
+      if (frame_counter % 2 == 0) {
+        next_frame_request = true;
+      }
     } else if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_1) {
       inside_frame = true;
     }
@@ -299,12 +322,7 @@ void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef* htim) {
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim) {
-  if (htim->Instance == TIM4) {
-    frame_counter++;
-    if (frame_counter % 2 == 0) {
-      next_frame_request = true;
-    }
-  }
+  if (htim->Instance == TIM4) {}
 }
 
 void HAL_MspInit(void) {
