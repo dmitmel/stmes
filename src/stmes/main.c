@@ -38,24 +38,46 @@ static const struct VgaTiming VGA_TIMING_800x600_60hz = {
   .vert_back_porch = 23,
 };
 
-#define FRAME_WIDTH 480
+#define FRAME_WIDTH 640
 #define FRAME_HEIGHT 480
-static u32 dma_buf1[FRAME_WIDTH], dma_buf2[FRAME_WIDTH];
-static u32 *dma_frontbuf = dma_buf1, *dma_backbuf = dma_buf2;
+
+static struct pixel_dma_buf {
+  u32 data[FRAME_WIDTH];
+  u16 non_zeroes[FRAME_WIDTH];
+  u16 non_zeroes_len;
+} dma_buf1 = { 0 }, dma_buf2 = { 0 };
+static struct pixel_dma_buf *dma_frontbuf = &dma_buf1, *dma_backbuf = &dma_buf2;
 static volatile bool inside_frame = false;
 static volatile bool line_paint_request = false;
 static volatile u32 frame_counter = 0;
 static volatile bool next_frame_request = false;
 
 static void swap_dma_buffers(void) {
-  u32* tmp = dma_backbuf;
+  struct pixel_dma_buf* tmp = dma_backbuf;
   dma_backbuf = dma_frontbuf;
   dma_frontbuf = tmp;
 }
 
-extern void initialise_monitor_handles(void);
+static void dma_buf_set_pixel(struct pixel_dma_buf* buf, u16 index, u32 value) {
+  buf->data[index] = value;
+  buf->non_zeroes[buf->non_zeroes_len++] = index;
+}
 
-#define check_fs_error(expr) ((expr) != FR_OK ? Error_Handler() : (void)0)
+static void dma_buf_reset(struct pixel_dma_buf* buf) {
+  u16 len = buf->non_zeroes_len;
+  u16* ptr = buf->non_zeroes;
+  u16* end = ptr;
+  for (end += len - len % 4; ptr != end; ptr += 4) {
+    u16 a = ptr[0], b = ptr[1], c = ptr[2], d = ptr[3];
+    buf->data[a] = buf->data[b] = buf->data[c] = buf->data[d] = 0;
+  }
+  for (end += len % 4; ptr != end; ptr += 1) {
+    buf->data[*ptr] = 0;
+  }
+  buf->non_zeroes_len = 0;
+}
+
+extern void initialise_monitor_handles(void);
 
 struct BufferedReader {
   u8 buffer[BLOCKSIZE * 8];
@@ -64,11 +86,11 @@ struct BufferedReader {
 };
 
 static u8* buffered_read(struct BufferedReader* self, FIL* file, FSIZE_t pos, FSIZE_t len) {
-  const FSIZE_t capacity = sizeof(self->buffer) / sizeof(*self->buffer);
-  if (len > capacity) {
+  const FSIZE_t capacity = SIZEOF(self->buffer);
+  if (unlikely(len > capacity)) {
     Error_Handler();
   }
-  if (!(self->offset_start <= pos && pos + len <= self->offset_end)) {
+  if (unlikely(!(self->offset_start <= pos && pos + len <= self->offset_end))) {
     self->offset_start = pos & ~(BLOCKSIZE - 1); // align to 512-byte boundaries
     self->offset_end = self->offset_start;
     if (f_tell(file) != self->offset_start) {
@@ -77,7 +99,7 @@ static u8* buffered_read(struct BufferedReader* self, FIL* file, FSIZE_t pos, FS
     UINT bytes_read;
     check_fs_error(f_read(file, self->buffer, capacity, &bytes_read));
     self->offset_end = self->offset_start + bytes_read;
-    if (!(self->offset_start <= pos && pos + len <= self->offset_end)) {
+    if (unlikely(!(self->offset_start <= pos && pos + len <= self->offset_end))) {
       Error_Handler();
     }
   }
@@ -278,27 +300,36 @@ int main(void) {
 
     if (line_paint_request) {
       line_paint_request = false;
+      struct pixel_dma_buf* backbuf = dma_backbuf;
+
+      dma_buf_reset(backbuf);
+      dma_buf_set_pixel(backbuf, 0, VGA_PIXEL_ALL_PINS << 16U);
+      dma_buf_set_pixel(backbuf, FRAME_WIDTH - 1, VGA_PIXEL_ALL_PINS << 16U);
 
       const int PIXEL_SCALE = 1;
-      u32 vga_row = __HAL_TIM_GET_COUNTER(&htim4) - 33;
-      u32 video_y = (vga_row - (FRAME_HEIGHT - video_height * PIXEL_SCALE) / 2) / PIXEL_SCALE;
-      if (video_y < video_height) {
-        struct frame_row* row = &frame_rows[video_y];
-        u32* backbuf_ptr = dma_backbuf + (FRAME_WIDTH / PIXEL_SCALE - video_width) / 2;
-        for (u32 i = 0; i != row->len; i++) {
+      u32 vga_row = (__HAL_TIM_GET_COUNTER(&htim4) + 1) % __HAL_TIM_GET_AUTORELOAD(&htim4) - 33;
+      u32 video_y = vga_row - (FRAME_HEIGHT - video_height * PIXEL_SCALE) / 2;
+      if (video_y / PIXEL_SCALE < video_height && video_y % PIXEL_SCALE == 0) {
+        struct frame_row* row = &frame_rows[video_y / PIXEL_SCALE];
+        usize pixel_idx = (FRAME_WIDTH / PIXEL_SCALE - video_width) / 2;
+        u32 prev_color = 0;
+        for (u32 i = 0; i < row->len; i++) {
           u8 encoded = row->data[i];
           u32 repeats = ((encoded >> 3) + 1) * PIXEL_SCALE;
           u32 color = color_pins_table[(encoded & 0x7) << 1];
-          fast_memset_u32(backbuf_ptr, color, repeats);
-          backbuf_ptr += repeats;
+          if (color != prev_color) {
+            dma_buf_set_pixel(backbuf, pixel_idx, color);
+            prev_color = color;
+          }
+          pixel_idx += repeats;
         }
-        dma_backbuf[FRAME_WIDTH - 1] = VGA_PIXEL_ALL_PINS << 16U;
-      } else {
-        fast_memset_u32(dma_backbuf, VGA_PIXEL_ALL_PINS << 16U, FRAME_WIDTH);
+        if (pixel_idx < FRAME_WIDTH) {
+          dma_buf_set_pixel(backbuf, pixel_idx, VGA_PIXEL_ALL_PINS << 16U);
+        }
       }
-
-      swap_dma_buffers();
     }
+
+    __WFE(); // Wait for event
   }
 }
 
@@ -311,8 +342,9 @@ void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef* htim) {
       HAL_DMA_Abort(&hdma_tim1_up);
       __HAL_DMA_DISABLE(&hdma_tim1_up); // flush the FIFO
       __HAL_TIM_SET_COUNTER(&htim1, 0);
+      swap_dma_buffers();
       HAL_DMA_Start(
-        &hdma_tim1_up, (usize)dma_frontbuf, (usize)&VGA_PIXEL_GPIO_Port->BSRR, FRAME_WIDTH
+        &hdma_tim1_up, (usize)dma_frontbuf->data, (usize)&VGA_PIXEL_GPIO_Port->BSRR, FRAME_WIDTH
       );
       GPIO_RESET_PIN(VGA_PIXEL_GPIO_Port, VGA_PIXEL_ALL_PINS);
     } else if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_1) {
@@ -384,7 +416,7 @@ u32 HAL_GetTick(void) {
   return TIM2->CNT / 2;
 }
 
-void Error_Handler(void) {
+__NO_RETURN void Error_Handler(void) {
   __disable_irq();
   while (1) {}
 }

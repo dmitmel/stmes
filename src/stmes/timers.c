@@ -13,7 +13,7 @@ TIM_HandleTypeDef htim4;
 void MX_TIM1_Init(void) {
   htim1.Instance = TIM1;
   htim1.Init = (TIM_Base_InitTypeDef){
-    .Prescaler = 0,
+    .Prescaler = 4 - 1,
     .CounterMode = TIM_COUNTERMODE_UP,
     .Period = 2 - 1,
     .ClockDivision = TIM_CLOCKDIVISION_DIV1,
@@ -160,17 +160,17 @@ void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* htim) {
     hdma_tim1_up.Instance = DMA2_Stream5;
     hdma_tim1_up.Init = (DMA_InitTypeDef){
       .Channel = DMA_CHANNEL_6,
-      .Direction = DMA_MEMORY_TO_PERIPH,
-      .PeriphInc = DMA_PINC_DISABLE,
-      .MemInc = DMA_MINC_ENABLE,
+      .Direction = DMA_PERIPH_TO_MEMORY,
+      .PeriphInc = DMA_PINC_ENABLE,
+      .MemInc = DMA_MINC_DISABLE,
       .PeriphDataAlignment = DMA_PDATAALIGN_WORD,
       .MemDataAlignment = DMA_MDATAALIGN_WORD,
       .Mode = DMA_NORMAL,
       .Priority = DMA_PRIORITY_HIGH,
       .FIFOMode = DMA_FIFOMODE_ENABLE,
-      .FIFOThreshold = DMA_FIFO_THRESHOLD_FULL,
+      .FIFOThreshold = DMA_FIFO_THRESHOLD_1QUARTERFULL,
       .MemBurst = DMA_MBURST_SINGLE,
-      .PeriphBurst = DMA_PBURST_SINGLE,
+      .PeriphBurst = DMA_PBURST_INC4,
     };
     check_hal_error(HAL_DMA_Init(&hdma_tim1_up));
     __HAL_LINKDMA(htim, hdma[TIM_DMA_ID_UPDATE], hdma_tim1_up);

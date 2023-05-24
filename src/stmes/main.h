@@ -9,7 +9,7 @@ extern "C" {
 
 void SystemClock_Config(void);
 
-void Error_Handler(void);
+__NO_RETURN void Error_Handler(void);
 
 enum __packed SyncPolarity {
   SYNC_PULSE_POLARITY_POSITIVE,
