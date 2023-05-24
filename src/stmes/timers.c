@@ -40,7 +40,7 @@ void MX_TIM1_Init(void) {
 void MX_TIM2_Init(void) {
   htim2.Instance = TIM2;
   htim2.Init = (TIM_Base_InitTypeDef){
-    .Prescaler = 0,
+    .Prescaler = 48000 - 1,
     .CounterMode = TIM_COUNTERMODE_UP,
     .Period = UINT32_MAX,
     .ClockDivision = TIM_CLOCKDIVISION_DIV1,
@@ -56,6 +56,7 @@ void MX_TIM2_Init(void) {
   check_hal_error(HAL_TIM_Base_Init(&htim2));
   check_hal_error(HAL_TIM_ConfigClockSource(&htim2, &clock_source_init));
   check_hal_error(HAL_TIMEx_MasterConfigSynchronization(&htim2, &master_init));
+  __HAL_DBGMCU_FREEZE_TIM2(); // Pause during debug
 }
 
 void MX_TIM3_Init(void) {

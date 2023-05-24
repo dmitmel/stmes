@@ -2,7 +2,6 @@
 #include "stmes/dma.h"
 #include "stmes/sdio.h"
 #include "stmes/timers.h"
-#include "stmes/utils.h"
 #include <stm32f4xx_hal.h>
 
 void NMI_Handler(void) {

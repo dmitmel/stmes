@@ -85,6 +85,12 @@ static u8* buffered_read(struct BufferedReader* self, FIL* file, FSIZE_t pos, FS
 }
 
 int main(void) {
+  // Enable the internal CPU cycle counter.
+  // <https://developer.arm.com/documentation/ddi0403/d/Debug-Architecture/ARMv7-M-Debug/The-Data-Watchpoint-and-Trace-unit/CYCCNT-cycle-counter-and-related-timers?lang=en>
+  CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+  DWT->CYCCNT = 0;
+  DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+
 #ifdef ARM_SEMIHOSTING_ENABLE
   // Actually enable the semihosting machinery only when the debugger is attached.
   if (CoreDebug->DHCSR & CoreDebug_DHCSR_C_DEBUGEN_Msk) {
@@ -104,8 +110,6 @@ int main(void) {
   MX_SDIO_SD_Init();
 
   check_hal_error(BSP_SD_Init());
-
-  check_hal_error(HAL_TIM_Base_Start(&htim2));
 
   check_hal_error(HAL_TIM_Base_Start_IT(&htim4));
   check_hal_error(HAL_TIM_OC_Start_IT(&htim4, TIM_CHANNEL_1));
@@ -358,6 +362,17 @@ void SystemClock_Config(void) {
   };
   u32 flash_latency = FLASH_LATENCY_3;
   check_hal_error(HAL_RCC_ClockConfig(&rcc_clk_init, flash_latency));
+}
+
+HAL_StatusTypeDef HAL_InitTick(u32 priority) {
+  UNUSED(priority);
+  MX_TIM2_Init();
+  check_hal_error(HAL_TIM_Base_Start(&htim2));
+  return HAL_OK;
+}
+
+u32 HAL_GetTick(void) {
+  return TIM2->CNT / 2;
 }
 
 void Error_Handler(void) {
