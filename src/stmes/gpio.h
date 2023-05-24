@@ -10,14 +10,12 @@ extern "C" {
 #define BLTN_LED_GPIO_Port GPIOC
 #define BLTN_KEY_Pin GPIO_PIN_0
 #define BLTN_KEY_GPIO_Port GPIOA
-#define SDIO_CD_Pin GPIO_PIN_1
-#define SDIO_CD_GPIO_Port GPIOA
-#define VGA_PIXEL_Pin GPIO_PIN_5
-#define VGA_PIXEL_GPIO_Port GPIOA
 #define SDIO_CMD_Pin GPIO_PIN_6
 #define SDIO_CMD_GPIO_Port GPIOA
 #define VGA_HSYNC_Pin GPIO_PIN_7
 #define VGA_HSYNC_GPIO_Port GPIOA
+#define SDIO_CD_Pin GPIO_PIN_1
+#define SDIO_CD_GPIO_Port GPIOB
 #define SDIO_CLK_Pin GPIO_PIN_15
 #define SDIO_CLK_GPIO_Port GPIOB
 #define SDIO_D1_Pin GPIO_PIN_8
@@ -30,6 +28,13 @@ extern "C" {
 #define SDIO_D3_GPIO_Port GPIOB
 #define VGA_VSYNC_Pin GPIO_PIN_8
 #define VGA_VSYNC_GPIO_Port GPIOB
+
+#define VGA_PIXEL_GPIO_Port GPIOA
+#define VGA_PIXEL1_Pin GPIO_PIN_1
+#define VGA_PIXEL2_Pin GPIO_PIN_2
+#define VGA_PIXEL3_Pin GPIO_PIN_3
+#define VGA_PIXEL4_Pin GPIO_PIN_4
+#define VGA_PIXEL_ALL_PINS (VGA_PIXEL1_Pin | VGA_PIXEL2_Pin | VGA_PIXEL3_Pin | VGA_PIXEL4_Pin)
 
 #define GPIO_SET_PIN(port, pin) ((port)->BSRR = (pin));
 #define GPIO_RESET_PIN(port, pin) ((port)->BSRR = (pin) << 16U);

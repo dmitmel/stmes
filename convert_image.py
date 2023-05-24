@@ -2,6 +2,12 @@ import struct
 
 from PIL import Image
 
+FRAME_COUNT = 6572
+COLOR_BITS = 3
+IMAGE_WIDTH = 480
+IMAGE_HEIGHT = 360
+FILE_SIZE_LIMIT = 4 * 1024 * 1024 * 1024
+
 
 def rle_encode(row: list[int]):
   row_len = len(row)
@@ -10,19 +16,13 @@ def rle_encode(row: list[int]):
   while i < row_len:
     value = row[i]
     j = i + 1
-    max_repeats = min(row_len, i + 0x80)
+    max_repeats = min(row_len, i + (0x100 >> COLOR_BITS))
     while j < max_repeats and row[j] == value:
       j += 1
     repeats = j - i
-    yield ((repeats - 1) << 1) | (1 if value else 0)
+    yield ((repeats - 1) << COLOR_BITS) | value
     i = j
 
-
-FRAME_COUNT = 6572
-IMAGE_WIDTH = 480
-IMAGE_HEIGHT = 360
-FILE_SIZE_LIMIT = 4 * 1024 * 1024 * 1024
-WHITE_THRESHOLD = 200
 
 frame_idx = 0
 batch_idx = 0
@@ -45,7 +45,7 @@ while frame_idx < FRAME_COUNT:
     print(frame_idx, batch_idx, batch_frame_idx)
 
     img = Image.open(img_path).resize((IMAGE_WIDTH, IMAGE_HEIGHT), Image.LANCZOS)
-    img = img.convert("L").point(lambda x: 255 if x > WHITE_THRESHOLD else 0, mode="1")
+    img = img.convert("L").point(lambda x: x >> (8 - COLOR_BITS), mode="1")
     width, height = img.size
     img_data = list(img.getdata(0))
 

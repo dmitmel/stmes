@@ -109,7 +109,10 @@ int main(void) {
   MX_TIM4_Init();
   MX_SDIO_SD_Init();
 
-  check_hal_error(BSP_SD_Init());
+  HAL_StatusTypeDef hal_status;
+  while ((hal_status = BSP_SD_Init()) != HAL_OK) {
+    HAL_Delay(200);
+  }
 
   check_hal_error(HAL_TIM_Base_Start_IT(&htim4));
   check_hal_error(HAL_TIM_OC_Start_IT(&htim4, TIM_CHANNEL_1));
@@ -123,7 +126,7 @@ int main(void) {
   static FATFS SDFatFS;
   static FIL SDFile;
   check_fs_error(f_mount(&SDFatFS, "", 1));
-  check_fs_error(f_open(&SDFile, "apple_full.bin", FA_READ));
+  check_fs_error(f_open(&SDFile, "apple_3bit.bin", FA_READ));
   FSIZE_t video_file_len = f_size(&SDFile);
 
   struct __PACKED video_header {
@@ -153,11 +156,7 @@ int main(void) {
     Error_Handler();
   }
 
-  u16* video_frames = malloc(video_frames_size);
-  check_fs_error(f_lseek(&SDFile, video_frames_start));
-  check_fs_error(f_read(&SDFile, video_frames, video_frames_size, NULL));
-
-  struct frame_row {
+  static struct frame_row {
     u8* data;
     u16 len, cap;
   } frame_rows[FRAME_HEIGHT];
@@ -176,6 +175,16 @@ int main(void) {
 
   // Wait a bit for the display to initialize
   HAL_Delay(500);
+
+  static u32 color_pins_table[1 << 4];
+  for (usize color = 0; color < (1 << 4); color++) {
+    u32 pins = 0;
+    pins |= VGA_PIXEL1_Pin << ((color & 1) ? 0U : 16U);
+    pins |= VGA_PIXEL2_Pin << ((color & 2) ? 0U : 16U);
+    pins |= VGA_PIXEL3_Pin << ((color & 4) ? 0U : 16U);
+    pins |= VGA_PIXEL4_Pin << ((color & 8) ? 0U : 16U);
+    color_pins_table[color] = pins;
+  }
 
   while (true) {
     if (next_frame_request) {
@@ -278,14 +287,14 @@ int main(void) {
         u32* backbuf_ptr = dma_backbuf + (FRAME_WIDTH / PIXEL_SCALE - video_width) / 2;
         for (u32 i = 0; i != row->len; i++) {
           u8 encoded = row->data[i];
-          u32 repeats = (encoded >> 1) + 1;
-          u32 value = encoded & 1;
-          fast_memset_u32(backbuf_ptr, VGA_PIXEL_Pin << (value ? 0U : 16U), repeats * PIXEL_SCALE);
-          backbuf_ptr += repeats * PIXEL_SCALE;
+          u32 repeats = ((encoded >> 3) + 1) * PIXEL_SCALE;
+          u32 color = color_pins_table[(encoded & 0x7) << 1];
+          fast_memset_u32(backbuf_ptr, color, repeats);
+          backbuf_ptr += repeats;
         }
-        dma_backbuf[FRAME_WIDTH - 1] = VGA_PIXEL_Pin << 16U;
+        dma_backbuf[FRAME_WIDTH - 1] = VGA_PIXEL_ALL_PINS << 16U;
       } else {
-        fast_memset_u32(dma_backbuf, VGA_PIXEL_Pin << 16U, FRAME_WIDTH);
+        fast_memset_u32(dma_backbuf, VGA_PIXEL_ALL_PINS << 16U, FRAME_WIDTH);
       }
 
       swap_dma_buffers();
@@ -298,14 +307,14 @@ void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef* htim) {
     if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_3) {
       // Reached the end of a line
       __HAL_TIM_DISABLE(&htim1);
-      GPIO_RESET_PIN(VGA_PIXEL_GPIO_Port, VGA_PIXEL_Pin);
+      GPIO_RESET_PIN(VGA_PIXEL_GPIO_Port, VGA_PIXEL_ALL_PINS);
       HAL_DMA_Abort(&hdma_tim1_up);
       __HAL_DMA_DISABLE(&hdma_tim1_up); // flush the FIFO
       __HAL_TIM_SET_COUNTER(&htim1, 0);
       HAL_DMA_Start(
         &hdma_tim1_up, (usize)dma_frontbuf, (usize)&VGA_PIXEL_GPIO_Port->BSRR, FRAME_WIDTH
       );
-      GPIO_RESET_PIN(VGA_PIXEL_GPIO_Port, VGA_PIXEL_Pin);
+      GPIO_RESET_PIN(VGA_PIXEL_GPIO_Port, VGA_PIXEL_ALL_PINS);
     } else if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_1) {
       // At the start of a new line
       if (inside_frame) {

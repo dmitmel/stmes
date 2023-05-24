@@ -119,5 +119,5 @@ HAL_StatusTypeDef BSP_SD_Init(void) {
 }
 
 bool BSP_SD_IsDetected(void) {
-  return HAL_GPIO_ReadPin(SDIO_CD_GPIO_Port, SDIO_CD_Pin) == GPIO_PIN_SET;
+  return HAL_GPIO_ReadPin(SDIO_CD_GPIO_Port, SDIO_CD_Pin) == GPIO_PIN_RESET;
 }

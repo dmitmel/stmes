@@ -8,7 +8,11 @@ void MX_GPIO_Init(void) {
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   HAL_GPIO_WritePin(BLTN_LED_GPIO_Port, BLTN_LED_Pin, GPIO_PIN_SET);
-  HAL_GPIO_WritePin(VGA_PIXEL_GPIO_Port, VGA_PIXEL_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(
+    VGA_PIXEL_GPIO_Port,
+    VGA_PIXEL1_Pin | VGA_PIXEL2_Pin | VGA_PIXEL3_Pin | VGA_PIXEL4_Pin,
+    GPIO_PIN_RESET
+  );
 
   GPIO_InitTypeDef gpio_init;
 
@@ -35,7 +39,7 @@ void MX_GPIO_Init(void) {
   HAL_GPIO_Init(SDIO_CD_GPIO_Port, &gpio_init);
 
   gpio_init = (GPIO_InitTypeDef){
-    .Pin = VGA_PIXEL_Pin,
+    .Pin = VGA_PIXEL_ALL_PINS,
     .Mode = GPIO_MODE_OUTPUT_PP,
     .Pull = GPIO_NOPULL,
     .Speed = GPIO_SPEED_FREQ_VERY_HIGH,
