@@ -1,27 +1,28 @@
 #include "stmes/interrupts.h"
 #include "stmes/dma.h"
+#include "stmes/main.h"
 #include "stmes/sdio.h"
 #include "stmes/timers.h"
 #include <stm32f4xx_hal.h>
 
 void NMI_Handler(void) {
-  while (1) {}
+  while (true) {}
 }
 
 void HardFault_Handler(void) {
-  while (1) {}
+  Error_Handler();
 }
 
 void MemManage_Handler(void) {
-  while (1) {}
+  Error_Handler();
 }
 
 void BusFault_Handler(void) {
-  while (1) {}
+  Error_Handler();
 }
 
 void UsageFault_Handler(void) {
-  while (1) {}
+  Error_Handler();
 }
 
 void SVC_Handler(void) {}

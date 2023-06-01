@@ -412,7 +412,13 @@ u32 HAL_GetTick(void) {
 
 __NO_RETURN void Error_Handler(void) {
   __disable_irq();
-  while (1) {}
+  while (true) {
+    const u32 blink_delay = 200;
+    GPIO_RESET_PIN(BLTN_LED_GPIO_Port, BLTN_LED_Pin);
+    HAL_Delay(blink_delay);
+    GPIO_SET_PIN(BLTN_LED_GPIO_Port, BLTN_LED_Pin);
+    HAL_Delay(blink_delay);
+  }
 }
 
 #ifdef USE_FULL_ASSERT
