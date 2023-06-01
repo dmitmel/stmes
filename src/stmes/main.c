@@ -40,6 +40,7 @@ static const struct VgaTiming VGA_TIMING_800x600_60hz = {
 
 #define FRAME_WIDTH 640
 #define FRAME_HEIGHT 480
+#define COLOR_BIT_DEPTH 8
 
 static struct pixel_dma_buf {
   u32 data[FRAME_WIDTH];
@@ -47,7 +48,6 @@ static struct pixel_dma_buf {
   u16 non_zeroes_len;
 } dma_buf1 = { 0 }, dma_buf2 = { 0 };
 static struct pixel_dma_buf *dma_frontbuf = &dma_buf1, *dma_backbuf = &dma_buf2;
-static volatile bool inside_frame = false;
 static volatile bool line_paint_request = false;
 static volatile u32 frame_counter = 0;
 static volatile bool next_frame_request = false;
@@ -128,7 +128,7 @@ int main(void) {
   MX_TIM1_Init();
   MX_TIM2_Init();
   MX_TIM3_Init();
-  MX_TIM4_Init();
+  MX_TIM9_Init();
   MX_SDIO_SD_Init();
 
   HAL_StatusTypeDef hal_status;
@@ -136,10 +136,9 @@ int main(void) {
     HAL_Delay(200);
   }
 
-  check_hal_error(HAL_TIM_Base_Start_IT(&htim4));
-  check_hal_error(HAL_TIM_OC_Start_IT(&htim4, TIM_CHANNEL_1));
-  check_hal_error(HAL_TIM_OC_Start_IT(&htim4, TIM_CHANNEL_2));
-  check_hal_error(HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3));
+  check_hal_error(HAL_TIM_Base_Start(&htim9));
+  check_hal_error(HAL_TIM_OC_Start_IT(&htim9, TIM_CHANNEL_1));
+  check_hal_error(HAL_TIM_PWM_Start(&htim9, TIM_CHANNEL_2));
   check_hal_error(HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2));
   check_hal_error(HAL_TIM_OC_Start_IT(&htim3, TIM_CHANNEL_1));
   check_hal_error(HAL_TIM_OC_Start_IT(&htim3, TIM_CHANNEL_3));
@@ -198,14 +197,16 @@ int main(void) {
   // Wait a bit for the display to initialize
   HAL_Delay(500);
 
-  static u32 color_pins_table[1 << 4];
-  for (usize color = 0; color < (1 << 4); color++) {
-    u32 pins = 0;
-    pins |= VGA_PIXEL1_Pin << ((color & 1) ? 0U : 16U);
-    pins |= VGA_PIXEL2_Pin << ((color & 2) ? 0U : 16U);
-    pins |= VGA_PIXEL3_Pin << ((color & 4) ? 0U : 16U);
-    pins |= VGA_PIXEL4_Pin << ((color & 8) ? 0U : 16U);
-    color_pins_table[color] = pins;
+  static u32 color_pins_table[1 << COLOR_BIT_DEPTH];
+  for (u32 color = 0; color < (1 << COLOR_BIT_DEPTH); color++) {
+    u32 all_pins = VGA_PIXEL_ALL_PINS;
+    u32 color_pins = 0;
+    for (u32 mask = 1; mask != (1 << COLOR_BIT_DEPTH); mask <<= 1) {
+      u32 pin = all_pins & -all_pins; // Extract the lowest set bit
+      color_pins |= (color & mask) != 0 ? pin : pin << 16U;
+      all_pins &= ~pin; // Strip off the pin
+    }
+    color_pins_table[color] = color_pins;
   }
 
   while (true) {
@@ -307,7 +308,7 @@ int main(void) {
       dma_buf_set_pixel(backbuf, FRAME_WIDTH - 1, VGA_PIXEL_ALL_PINS << 16U);
 
       const int PIXEL_SCALE = 1;
-      u32 vga_row = (__HAL_TIM_GET_COUNTER(&htim4) + 1) % __HAL_TIM_GET_AUTORELOAD(&htim4) - 33;
+      u32 vga_row = (__HAL_TIM_GET_COUNTER(&htim9) + 1) % __HAL_TIM_GET_AUTORELOAD(&htim9) - 33;
       u32 video_y = vga_row - (FRAME_HEIGHT - video_height * PIXEL_SCALE) / 2;
       if (video_y / PIXEL_SCALE < video_height && video_y % PIXEL_SCALE == 0) {
         struct frame_row* row = &frame_rows[video_y / PIXEL_SCALE];
@@ -349,25 +350,18 @@ void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef* htim) {
       GPIO_RESET_PIN(VGA_PIXEL_GPIO_Port, VGA_PIXEL_ALL_PINS);
     } else if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_1) {
       // At the start of a new line
-      if (inside_frame) {
+      if (__HAL_TIM_GET_COUNTER(&htim9) - 33 < 480) {
         line_paint_request = true;
       }
     }
-  } else if (htim->Instance == TIM4) {
-    if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_2) {
-      inside_frame = false;
+  } else if (htim->Instance == TIM9) {
+    if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_1) {
       frame_counter++;
       if (frame_counter % 2 == 0) {
         next_frame_request = true;
       }
-    } else if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_1) {
-      inside_frame = true;
     }
   }
-}
-
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim) {
-  if (htim->Instance == TIM4) {}
 }
 
 void HAL_MspInit(void) {

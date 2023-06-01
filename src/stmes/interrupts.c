@@ -50,14 +50,15 @@ void DMA2_Stream6_IRQHandler(void) {
   HAL_DMA_IRQHandler(&hdma_sdio_tx);
 }
 
+void TIM1_BRK_TIM9_IRQHandler(void) {
+  HAL_TIM_IRQHandler(&htim9);
+  HAL_TIM_IRQHandler(&htim1);
+}
+
 void TIM2_IRQHandler(void) {
   HAL_TIM_IRQHandler(&htim2);
 }
 
 void TIM3_IRQHandler(void) {
   HAL_TIM_IRQHandler(&htim3);
-}
-
-void TIM4_IRQHandler(void) {
-  HAL_TIM_IRQHandler(&htim4);
 }

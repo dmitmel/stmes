@@ -8,7 +8,7 @@
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
-TIM_HandleTypeDef htim4;
+TIM_HandleTypeDef htim9;
 
 void MX_TIM1_Init(void) {
   htim1.Instance = TIM1;
@@ -106,9 +106,9 @@ void MX_TIM3_Init(void) {
   HAL_TIM_MspPostInit(&htim3);
 }
 
-void MX_TIM4_Init(void) {
-  htim4.Instance = TIM4;
-  htim4.Init = (TIM_Base_InitTypeDef){
+void MX_TIM9_Init(void) {
+  htim9.Instance = TIM9;
+  htim9.Init = (TIM_Base_InitTypeDef){
     .Prescaler = 0,
     .CounterMode = TIM_COUNTERMODE_UP,
     .Period = 525 - 1,
@@ -117,7 +117,7 @@ void MX_TIM4_Init(void) {
   };
   TIM_SlaveConfigTypeDef slave_init = {
     .SlaveMode = TIM_SLAVEMODE_EXTERNAL1,
-    .InputTrigger = TIM_TS_ITR2,
+    .InputTrigger = TIM_TS_ITR1,
   };
   TIM_MasterConfigTypeDef master_init = {
     .MasterOutputTrigger = TIM_TRGO_RESET,
@@ -125,33 +125,24 @@ void MX_TIM4_Init(void) {
   };
   TIM_OC_InitTypeDef channel1_init = {
     .OCMode = TIM_OCMODE_TIMING,
-    .Pulse = 33,
-    .OCPolarity = TIM_OCPOLARITY_HIGH,
-    .OCFastMode = TIM_OCFAST_DISABLE,
-  };
-  TIM_OC_InitTypeDef channel2_init = {
-    .OCMode = TIM_OCMODE_TIMING,
     .Pulse = 33 + 480,
     .OCPolarity = TIM_OCPOLARITY_HIGH,
     .OCFastMode = TIM_OCFAST_DISABLE,
   };
-  TIM_OC_InitTypeDef channel3_init = {
+  TIM_OC_InitTypeDef channel2_init = {
     .OCMode = TIM_OCMODE_PWM1,
     .Pulse = 33 + 480 + 10,
     .OCPolarity = TIM_OCPOLARITY_HIGH,
     .OCFastMode = TIM_OCFAST_DISABLE,
   };
-  check_hal_error(HAL_TIM_Base_Init(&htim4));
-  check_hal_error(HAL_TIM_OC_Init(&htim4));
-  check_hal_error(HAL_TIM_PWM_Init(&htim4));
-  check_hal_error(HAL_TIM_SlaveConfigSynchro(&htim4, &slave_init));
-  check_hal_error(HAL_TIMEx_MasterConfigSynchronization(&htim4, &master_init));
-  check_hal_error(HAL_TIM_OC_ConfigChannel(&htim4, &channel1_init, TIM_CHANNEL_1));
-  __HAL_TIM_ENABLE_OCxPRELOAD(&htim4, TIM_CHANNEL_1);
-  check_hal_error(HAL_TIM_OC_ConfigChannel(&htim4, &channel2_init, TIM_CHANNEL_2));
-  __HAL_TIM_ENABLE_OCxPRELOAD(&htim4, TIM_CHANNEL_2);
-  check_hal_error(HAL_TIM_OC_ConfigChannel(&htim4, &channel3_init, TIM_CHANNEL_3));
-  HAL_TIM_MspPostInit(&htim4);
+  check_hal_error(HAL_TIM_Base_Init(&htim9));
+  check_hal_error(HAL_TIM_OC_Init(&htim9));
+  check_hal_error(HAL_TIM_PWM_Init(&htim9));
+  check_hal_error(HAL_TIM_SlaveConfigSynchro(&htim9, &slave_init));
+  check_hal_error(HAL_TIMEx_MasterConfigSynchronization(&htim9, &master_init));
+  check_hal_error(HAL_TIM_OC_ConfigChannel(&htim9, &channel1_init, TIM_CHANNEL_1));
+  check_hal_error(HAL_TIM_PWM_ConfigChannel(&htim9, &channel2_init, TIM_CHANNEL_2));
+  HAL_TIM_MspPostInit(&htim9);
 }
 
 void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* htim) {
@@ -174,16 +165,18 @@ void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* htim) {
     };
     check_hal_error(HAL_DMA_Init(&hdma_tim1_up));
     __HAL_LINKDMA(htim, hdma[TIM_DMA_ID_UPDATE], hdma_tim1_up);
+    HAL_NVIC_SetPriority(TIM1_BRK_TIM9_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(TIM1_BRK_TIM9_IRQn);
   } else if (htim->Instance == TIM2) {
     __HAL_RCC_TIM2_CLK_ENABLE();
   } else if (htim->Instance == TIM3) {
     __HAL_RCC_TIM3_CLK_ENABLE();
     HAL_NVIC_SetPriority(TIM3_IRQn, 0, 0);
     HAL_NVIC_EnableIRQ(TIM3_IRQn);
-  } else if (htim->Instance == TIM4) {
-    __HAL_RCC_TIM4_CLK_ENABLE();
-    HAL_NVIC_SetPriority(TIM4_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(TIM4_IRQn);
+  } else if (htim->Instance == TIM9) {
+    __HAL_RCC_TIM9_CLK_ENABLE();
+    HAL_NVIC_SetPriority(TIM1_BRK_TIM9_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(TIM1_BRK_TIM9_IRQn);
   }
 }
 
@@ -198,14 +191,14 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef* htim) {
       .Alternate = GPIO_AF2_TIM3,
     };
     HAL_GPIO_Init(VGA_HSYNC_GPIO_Port, &gpio_init);
-  } else if (htim->Instance == TIM4) {
-    __HAL_RCC_GPIOB_CLK_ENABLE();
+  } else if (htim->Instance == TIM9) {
+    __HAL_RCC_GPIOA_CLK_ENABLE();
     GPIO_InitTypeDef gpio_init = {
       .Pin = VGA_VSYNC_Pin,
       .Mode = GPIO_MODE_AF_PP,
       .Pull = GPIO_NOPULL,
       .Speed = GPIO_SPEED_FREQ_LOW,
-      .Alternate = GPIO_AF2_TIM4,
+      .Alternate = GPIO_AF3_TIM9,
     };
     HAL_GPIO_Init(VGA_VSYNC_GPIO_Port, &gpio_init);
   }
@@ -215,13 +208,14 @@ void HAL_TIM_Base_MspDeInit(TIM_HandleTypeDef* htim) {
   if (htim->Instance == TIM1) {
     __HAL_RCC_TIM1_CLK_DISABLE();
     HAL_DMA_DeInit(htim->hdma[TIM_DMA_ID_UPDATE]);
+    // HAL_NVIC_DisableIRQ(TIM1_BRK_TIM9_IRQn);
   } else if (htim->Instance == TIM2) {
     __HAL_RCC_TIM2_CLK_DISABLE();
   } else if (htim->Instance == TIM3) {
     __HAL_RCC_TIM3_CLK_DISABLE();
     HAL_NVIC_DisableIRQ(TIM3_IRQn);
-  } else if (htim->Instance == TIM4) {
-    __HAL_RCC_TIM4_CLK_DISABLE();
-    HAL_NVIC_DisableIRQ(TIM4_IRQn);
+  } else if (htim->Instance == TIM9) {
+    __HAL_RCC_TIM9_CLK_DISABLE();
+    // HAL_NVIC_DisableIRQ(TIM1_BRK_TIM9_IRQn);
   }
 }
