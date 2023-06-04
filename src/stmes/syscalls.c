@@ -2,7 +2,7 @@
 #include "stmes/utils.h"
 #include <errno.h>
 
-void* _sbrk(ptrdiff_t incr) {
+__USED void* _sbrk(ptrdiff_t incr) {
   // These three are defined by the linker script
   extern u8 _end;
   extern u8 _estack;
