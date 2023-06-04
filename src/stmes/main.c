@@ -4,39 +4,13 @@
 #include "stmes/sdio.h"
 #include "stmes/timers.h"
 #include "stmes/utils.h"
+#include "stmes/video/vga.h"
 #include <ff.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stm32f4xx_hal.h>
+#include <stm32f4xx_ll_gpio.h>
 #include <string.h>
-
-static const struct VgaTiming VGA_TIMING_640x480_60hz = {
-  .pixel_freq_hz = 25175000,
-  .visible_width = 640,
-  .horz_front_porch = 16,
-  .hsync_polarity = SYNC_PULSE_POLARITY_NEGATIVE,
-  .hsync_pulse = 96,
-  .horz_back_porch = 48,
-  .visible_height = 480,
-  .vert_front_porch = 10,
-  .vsync_polarity = SYNC_PULSE_POLARITY_NEGATIVE,
-  .vsync_pulse = 2,
-  .vert_back_porch = 33,
-};
-
-static const struct VgaTiming VGA_TIMING_800x600_60hz = {
-  .pixel_freq_hz = 40000000,
-  .visible_width = 800,
-  .horz_front_porch = 40,
-  .hsync_polarity = SYNC_PULSE_POLARITY_POSITIVE,
-  .hsync_pulse = 128,
-  .horz_back_porch = 88,
-  .visible_height = 600,
-  .vert_front_porch = 1,
-  .vsync_polarity = SYNC_PULSE_POLARITY_POSITIVE,
-  .vsync_pulse = 4,
-  .vert_back_porch = 23,
-};
 
 #define FRAME_WIDTH 640
 #define FRAME_HEIGHT 480
@@ -125,24 +99,18 @@ int main(void) {
 
   MX_GPIO_Init();
   MX_DMA_Init();
-  MX_TIM1_Init();
   MX_TIM2_Init();
-  MX_TIM3_Init();
-  MX_TIM9_Init();
   MX_SDIO_SD_Init();
+
+  vga_init();
 
   HAL_StatusTypeDef hal_status;
   while ((hal_status = BSP_SD_Init()) != HAL_OK) {
     HAL_Delay(200);
   }
 
-  check_hal_error(HAL_TIM_Base_Start(&htim9));
-  check_hal_error(HAL_TIM_OC_Start_IT(&htim9, TIM_CHANNEL_1));
-  check_hal_error(HAL_TIM_PWM_Start(&htim9, TIM_CHANNEL_2));
-  check_hal_error(HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2));
-  check_hal_error(HAL_TIM_OC_Start_IT(&htim3, TIM_CHANNEL_1));
-  check_hal_error(HAL_TIM_OC_Start_IT(&htim3, TIM_CHANNEL_3));
-  check_hal_error(HAL_TIM_Base_Start(&htim3));
+  vga_apply_timings(&VGA_TIMINGS_640x480_57hz);
+  vga_start();
 
   static FATFS SDFatFS;
   static FIL SDFile;
@@ -308,8 +276,9 @@ int main(void) {
       dma_buf_set_pixel(backbuf, FRAME_WIDTH - 1, VGA_PIXEL_ALL_PINS << 16U);
 
       const int PIXEL_SCALE = 1;
-      u32 vga_row = (__HAL_TIM_GET_COUNTER(&htim9) + 1) % __HAL_TIM_GET_AUTORELOAD(&htim9) - 33;
-      u32 video_y = vga_row - (FRAME_HEIGHT - video_height * PIXEL_SCALE) / 2;
+      u32 vga_row =
+        (__HAL_TIM_GET_COUNTER(&vga_vsync_timer) + 1) % __HAL_TIM_GET_AUTORELOAD(&vga_vsync_timer);
+      u32 video_y = (vga_row - 33) - (FRAME_HEIGHT - video_height * PIXEL_SCALE) / 2;
       if (video_y / PIXEL_SCALE < video_height && video_y % PIXEL_SCALE == 0) {
         struct frame_row* row = &frame_rows[video_y / PIXEL_SCALE];
         usize pixel_idx = (FRAME_WIDTH / PIXEL_SCALE - video_width) / 2;
@@ -338,19 +307,19 @@ void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef* htim) {
   if (htim->Instance == TIM3) {
     if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_3) {
       // Reached the end of a line
-      __HAL_TIM_DISABLE(&htim1);
-      GPIO_RESET_PIN(VGA_PIXEL_GPIO_Port, VGA_PIXEL_ALL_PINS);
-      HAL_DMA_Abort(&hdma_tim1_up);
-      __HAL_DMA_DISABLE(&hdma_tim1_up); // flush the FIFO
-      __HAL_TIM_SET_COUNTER(&htim1, 0);
+      __HAL_TIM_DISABLE(&vga_pixel_timer);
+      LL_GPIO_ResetOutputPin(VGA_PIXEL_GPIO_Port, VGA_PIXEL_ALL_PINS);
+      HAL_DMA_Abort(&vga_pixel_dma);
+      __HAL_DMA_DISABLE(&vga_pixel_dma); // flush the FIFO
+      __HAL_TIM_SET_COUNTER(&vga_pixel_timer, 0);
       swap_dma_buffers();
       HAL_DMA_Start(
-        &hdma_tim1_up, (usize)dma_frontbuf->data, (usize)&VGA_PIXEL_GPIO_Port->BSRR, FRAME_WIDTH
+        &vga_pixel_dma, (usize)dma_frontbuf->data, (usize)&VGA_PIXEL_GPIO_Port->BSRR, FRAME_WIDTH
       );
-      GPIO_RESET_PIN(VGA_PIXEL_GPIO_Port, VGA_PIXEL_ALL_PINS);
+      LL_GPIO_ResetOutputPin(VGA_PIXEL_GPIO_Port, VGA_PIXEL_ALL_PINS);
     } else if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_1) {
       // At the start of a new line
-      if (__HAL_TIM_GET_COUNTER(&htim9) - 33 < 480) {
+      if (__HAL_TIM_GET_COUNTER(&vga_vsync_timer) - 33 < 480) {
         line_paint_request = true;
       }
     }
@@ -414,9 +383,9 @@ __NO_RETURN void Error_Handler(void) {
   __disable_irq();
   while (true) {
     const u32 blink_delay = 200;
-    GPIO_RESET_PIN(BLTN_LED_GPIO_Port, BLTN_LED_Pin);
+    LL_GPIO_SetOutputPin(BLTN_LED_GPIO_Port, BLTN_LED_Pin);
     HAL_Delay(blink_delay);
-    GPIO_SET_PIN(BLTN_LED_GPIO_Port, BLTN_LED_Pin);
+    LL_GPIO_ResetOutputPin(BLTN_LED_GPIO_Port, BLTN_LED_Pin);
     HAL_Delay(blink_delay);
   }
 }

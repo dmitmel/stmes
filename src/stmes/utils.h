@@ -12,6 +12,13 @@ extern "C" {
 
 #define SIZEOF(x) sizeof((x)) / sizeof(*(x))
 
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#define ABS(x) ((x) >= 0 ? (x) : -(x))
+#define floor_div(a, b) ((a) / (b))
+#define ceil_div(a, b) ((a) / (b) + ((a) % (b) != 0))
+#define round_div(a, b) ((a) / (b) + ((a) % (b) > (b) / 2))
+
 #ifdef __GNUC__
 #define GCC_ATTRIBUTE(expr) __attribute__((expr))
 #define likely(x) __builtin_expect(!!(x), 1)

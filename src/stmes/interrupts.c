@@ -3,6 +3,7 @@
 #include "stmes/main.h"
 #include "stmes/sdio.h"
 #include "stmes/timers.h"
+#include "stmes/video/vga.h"
 #include <stm32f4xx_hal.h>
 
 void NMI_Handler(void) {
@@ -43,17 +44,13 @@ void DMA2_Stream3_IRQHandler(void) {
   HAL_DMA_IRQHandler(&hdma_sdio_rx);
 }
 
-void DMA2_Stream5_IRQHandler(void) {
-  HAL_DMA_IRQHandler(&hdma_tim1_up);
-}
-
 void DMA2_Stream6_IRQHandler(void) {
   HAL_DMA_IRQHandler(&hdma_sdio_tx);
 }
 
 void TIM1_BRK_TIM9_IRQHandler(void) {
-  HAL_TIM_IRQHandler(&htim9);
-  HAL_TIM_IRQHandler(&htim1);
+  HAL_TIM_IRQHandler(&vga_vsync_timer);
+  HAL_TIM_IRQHandler(&vga_pixel_timer);
 }
 
 void TIM2_IRQHandler(void) {
@@ -61,5 +58,5 @@ void TIM2_IRQHandler(void) {
 }
 
 void TIM3_IRQHandler(void) {
-  HAL_TIM_IRQHandler(&htim3);
+  HAL_TIM_IRQHandler(&vga_hsync_timer);
 }

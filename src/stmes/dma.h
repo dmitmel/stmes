@@ -6,7 +6,6 @@
 extern "C" {
 #endif
 
-extern DMA_HandleTypeDef hdma_tim1_up;
 extern DMA_HandleTypeDef hdma_sdio_rx;
 extern DMA_HandleTypeDef hdma_sdio_tx;
 
