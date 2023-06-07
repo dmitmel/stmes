@@ -55,6 +55,15 @@ DSTATUS disk_status(BYTE pdrv) {
   return sd_check_status();
 }
 
+__STATIC_INLINE HAL_StatusTypeDef sd_read_aligned(u8* buf, u32 sector, u32 count) {
+  HAL_StatusTypeDef res;
+  sd_read_done = false;
+  if ((res = HAL_SD_ReadBlocks_DMA(&hsd, buf, sector, count)) != HAL_OK) return res;
+  if ((res = sd_wait_until_flag_set(&sd_read_done, SD_TIMEOUT)) != HAL_OK) return res;
+  sd_read_done = false;
+  return HAL_OK;
+}
+
 DRESULT disk_read(BYTE pdrv, BYTE* buff, DWORD sector, UINT count) {
   UNUSED(pdrv);
   if (sd_wait_for_card_state(HAL_SD_CARD_TRANSFER, SD_TIMEOUT) != HAL_OK) {
@@ -63,34 +72,27 @@ DRESULT disk_read(BYTE pdrv, BYTE* buff, DWORD sector, UINT count) {
 
   // Take the fast path if the output buffer is 4-byte aligned
   if ((usize)buff % 4 == 0) {
-    sd_read_done = false;
-    if (HAL_SD_ReadBlocks_DMA(&hsd, buff, sector, count) != HAL_OK) {
-      return RES_ERROR;
-    }
-    if (sd_wait_until_flag_set(&sd_read_done, SD_TIMEOUT) != HAL_OK) {
-      return RES_ERROR;
-    }
-    sd_read_done = false;
-    if (sd_wait_for_card_state(HAL_SD_CARD_TRANSFER, SD_TIMEOUT) != HAL_OK) {
-      return RES_ERROR;
-    }
+    if (sd_read_aligned(buff, sector, count) != HAL_OK) return RES_ERROR;
+    if (sd_wait_for_card_state(HAL_SD_CARD_TRANSFER, SD_TIMEOUT) != HAL_OK) return RES_ERROR;
     return RES_OK;
   }
 
   // Otherwise, fetch each sector to an aligned buffer and copy it to the destination
   for (UINT last = sector + count; sector < last; sector++) {
-    sd_read_done = false;
-    if (HAL_SD_ReadBlocks_DMA(&hsd, dma_scratch, sector, 1) != HAL_OK) {
-      return RES_ERROR;
-    }
-    if (sd_wait_until_flag_set(&sd_read_done, SD_TIMEOUT) != HAL_OK) {
-      return RES_ERROR;
-    }
-    sd_read_done = false;
+    if (sd_read_aligned(dma_scratch, sector, 1) != HAL_OK) return RES_ERROR;
     fast_memcpy_u8(buff, dma_scratch, BLOCKSIZE);
     buff += BLOCKSIZE;
   }
   return RES_OK;
+}
+
+__STATIC_INLINE HAL_StatusTypeDef sd_write_aligned(const u8* buf, u32 sector, u32 count) {
+  HAL_StatusTypeDef res;
+  sd_write_done = false;
+  if ((res = HAL_SD_WriteBlocks_DMA(&hsd, (u8*)buf, sector, count)) != HAL_OK) return res;
+  if ((res = sd_wait_until_flag_set(&sd_write_done, SD_TIMEOUT)) != HAL_OK) return res;
+  sd_write_done = false;
+  return HAL_OK;
 }
 
 DRESULT disk_write(BYTE pdrv, const BYTE* buff, DWORD sector, UINT count) {
@@ -101,17 +103,8 @@ DRESULT disk_write(BYTE pdrv, const BYTE* buff, DWORD sector, UINT count) {
 
   // Take the fast path if the output buffer is 4-byte aligned
   if ((usize)buff % 4 == 0) {
-    sd_write_done = false;
-    if (HAL_SD_WriteBlocks_DMA(&hsd, (BYTE*)buff, sector, count) != HAL_OK) {
-      return RES_ERROR;
-    }
-    if (sd_wait_until_flag_set(&sd_write_done, SD_TIMEOUT) != HAL_OK) {
-      return RES_ERROR;
-    }
-    sd_write_done = false;
-    if (sd_wait_for_card_state(HAL_SD_CARD_TRANSFER, SD_TIMEOUT) != HAL_OK) {
-      return RES_ERROR;
-    }
+    if (sd_write_aligned(buff, sector, count) != HAL_OK) return RES_ERROR;
+    if (sd_wait_for_card_state(HAL_SD_CARD_TRANSFER, SD_TIMEOUT) != HAL_OK) return RES_ERROR;
     return RES_OK;
   }
 
@@ -119,14 +112,7 @@ DRESULT disk_write(BYTE pdrv, const BYTE* buff, DWORD sector, UINT count) {
   for (UINT last = sector + count; sector < last; sector++) {
     fast_memcpy_u8(dma_scratch, buff, BLOCKSIZE);
     buff += BLOCKSIZE;
-    sd_write_done = false;
-    if (HAL_SD_WriteBlocks_DMA(&hsd, dma_scratch, sector, 1) != HAL_OK) {
-      return RES_ERROR;
-    }
-    if (sd_wait_until_flag_set(&sd_write_done, SD_TIMEOUT) != HAL_OK) {
-      return RES_ERROR;
-    }
-    sd_write_done = false;
+    if (sd_write_aligned(dma_scratch, sector, 1) != HAL_OK) return RES_ERROR;
   }
   return RES_OK;
 }
