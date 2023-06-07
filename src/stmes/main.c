@@ -9,30 +9,25 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stm32f4xx_hal.h>
+#include <stm32f4xx_ll_dma.h>
 #include <stm32f4xx_ll_gpio.h>
+#include <stm32f4xx_ll_tim.h>
 #include <string.h>
 
-#define FRAME_WIDTH 640
-#define FRAME_HEIGHT 480
-#define COLOR_BIT_DEPTH 8
+#define PIXEL_SCALE 2
+#define FRAME_WIDTH (640 / PIXEL_SCALE)
+#define FRAME_HEIGHT (480 / PIXEL_SCALE)
+#define COLOR_BIT_DEPTH 12
 
 static struct pixel_dma_buf {
   u32 data[FRAME_WIDTH];
   u16 non_zeroes[FRAME_WIDTH];
   u16 non_zeroes_len;
 } dma_buf1 = { 0 }, dma_buf2 = { 0 };
-static struct pixel_dma_buf *dma_frontbuf = &dma_buf1, *dma_backbuf = &dma_buf2;
-static volatile bool line_paint_request = false;
-static volatile u32 frame_counter = 0;
-static volatile bool next_frame_request = false;
+static bool dma_buffers_swapped = false;
+static u32 frame_counter = 0;
 
-static void swap_dma_buffers(void) {
-  struct pixel_dma_buf* tmp = dma_backbuf;
-  dma_backbuf = dma_frontbuf;
-  dma_frontbuf = tmp;
-}
-
-static void dma_buf_set_pixel(struct pixel_dma_buf* buf, u16 index, u32 value) {
+__STATIC_INLINE void dma_buf_set_pixel(struct pixel_dma_buf* buf, u16 index, u32 value) {
   buf->data[index] = value;
   buf->non_zeroes[buf->non_zeroes_len++] = index;
 }
@@ -80,6 +75,17 @@ static u8* buffered_read(struct BufferedReader* self, FIL* file, FSIZE_t pos, FS
   return &self->buffer[pos - self->offset_start];
 }
 
+__STATIC_FORCEINLINE u32 color_to_pins(u16 color) {
+  u32 all_pins = VGA_PIXEL_ALL_PINS;
+  u32 color_pins = 0;
+  for (u32 mask = 1; mask != (1 << COLOR_BIT_DEPTH); mask <<= 1) {
+    u32 pin = all_pins & -all_pins; // Extract the lowest set bit
+    color_pins |= (color & mask) != 0 ? pin : pin << 16U;
+    all_pins &= ~pin; // Strip off the pin
+  }
+  return color_pins;
+}
+
 int main(void) {
   // Enable the internal CPU cycle counter.
   // <https://developer.arm.com/documentation/ddi0403/d/Debug-Architecture/ARMv7-M-Debug/The-Data-Watchpoint-and-Trace-unit/CYCCNT-cycle-counter-and-related-timers?lang=en>
@@ -115,7 +121,7 @@ int main(void) {
   static FATFS SDFatFS;
   static FIL SDFile;
   check_fs_error(f_mount(&SDFatFS, "", 1));
-  check_fs_error(f_open(&SDFile, "apple_3bit.bin", FA_READ));
+  check_fs_error(f_open(&SDFile, "bebop_color_3bit.bin", FA_READ));
   FSIZE_t video_file_len = f_size(&SDFile);
 
   struct __PACKED video_header {
@@ -157,16 +163,14 @@ int main(void) {
   }
 
   usize frame_nr = 0;
-  next_frame_request = true;
-  line_paint_request = true;
-
   u32 next_row_offset = 0, prev_row_offset = 0, frame_deltas_offset = 0;
 
   // Wait a bit for the display to initialize
   HAL_Delay(500);
 
-  static u32 color_pins_table[1 << COLOR_BIT_DEPTH];
-  for (u32 color = 0; color < (1 << COLOR_BIT_DEPTH); color++) {
+  static u32 video_palette[8] = { 0x000, 0x00F, 0x0F0, 0x0FF, 0xF00, 0xF0F, 0xFF0, 0xFFF };
+  for (usize i = 0; i < SIZEOF(video_palette); i++) {
+    u32 color = video_palette[i];
     u32 all_pins = VGA_PIXEL_ALL_PINS;
     u32 color_pins = 0;
     for (u32 mask = 1; mask != (1 << COLOR_BIT_DEPTH); mask <<= 1) {
@@ -174,13 +178,20 @@ int main(void) {
       color_pins |= (color & mask) != 0 ? pin : pin << 16U;
       all_pins &= ~pin; // Strip off the pin
     }
-    color_pins_table[color] = color_pins;
+    video_palette[i] = color_pins;
   }
 
   while (true) {
-    if (next_frame_request) {
-      next_frame_request = false;
+    bool load_next_frame = false;
+    if (unlikely(vga_registers.next_frame_request)) {
+      vga_registers.next_frame_request = false;
+      frame_counter++;
+      if (frame_counter % 2 == 0) {
+        load_next_frame = true;
+      }
+    }
 
+    if (unlikely(load_next_frame)) {
       if (frame_nr >= frames_len) {
         frame_nr = 0;
         next_row_offset = 0;
@@ -267,31 +278,41 @@ int main(void) {
       frame_deltas_offset += deltas_len;
     }
 
-    if (line_paint_request) {
-      line_paint_request = false;
-      struct pixel_dma_buf* backbuf = dma_backbuf;
+    u16 vga_line = 0;
+    if (unlikely(vga_take_scanline_request(&vga_line))) {
+      struct pixel_dma_buf* backbuf = dma_buffers_swapped ? &dma_buf2 : &dma_buf1;
+      struct VgaScanline scanline = {
+        .buffer = backbuf->data,
+        .length = FRAME_WIDTH,
+        .pixel_scale = PIXEL_SCALE - 1,
+        .repeats = PIXEL_SCALE - 1,
+      };
+      vga_set_next_scanline(&scanline);
+      dma_buffers_swapped = !dma_buffers_swapped;
 
       dma_buf_reset(backbuf);
       dma_buf_set_pixel(backbuf, 0, VGA_PIXEL_ALL_PINS << 16U);
       dma_buf_set_pixel(backbuf, FRAME_WIDTH - 1, VGA_PIXEL_ALL_PINS << 16U);
 
-      const int PIXEL_SCALE = 1;
-      u32 vga_row =
-        (__HAL_TIM_GET_COUNTER(&vga_vsync_timer) + 1) % __HAL_TIM_GET_AUTORELOAD(&vga_vsync_timer);
-      u32 video_y = (vga_row - 33) - (FRAME_HEIGHT - video_height * PIXEL_SCALE) / 2;
-      if (video_y / PIXEL_SCALE < video_height && video_y % PIXEL_SCALE == 0) {
-        struct frame_row* row = &frame_rows[video_y / PIXEL_SCALE];
-        usize pixel_idx = (FRAME_WIDTH / PIXEL_SCALE - video_width) / 2;
+      u32 video_y = vga_line / PIXEL_SCALE - (FRAME_HEIGHT - video_height) / 2;
+      if (video_y >= video_height) {
+        Error_Handler();
+      } else {
+        struct frame_row* row = &frame_rows[video_y];
+        usize pixel_idx = (FRAME_WIDTH - video_width) / 2;
         u32 prev_color = 0;
         for (u32 i = 0; i < row->len; i++) {
           u8 encoded = row->data[i];
-          u32 repeats = ((encoded >> 3) + 1) * PIXEL_SCALE;
-          u32 color = color_pins_table[(encoded & 0x7) << 1];
+          u32 repeats = (encoded >> 3) + 1;
+          u32 color = video_palette[(encoded & 0x7)];
           if (color != prev_color) {
             dma_buf_set_pixel(backbuf, pixel_idx, color);
             prev_color = color;
           }
           pixel_idx += repeats;
+        }
+        if (pixel_idx > FRAME_WIDTH) {
+          Error_Handler();
         }
         if (pixel_idx < FRAME_WIDTH) {
           dma_buf_set_pixel(backbuf, pixel_idx, VGA_PIXEL_ALL_PINS << 16U);
@@ -300,36 +321,6 @@ int main(void) {
     }
 
     __WFE(); // Wait for event
-  }
-}
-
-void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef* htim) {
-  if (htim->Instance == TIM3) {
-    if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_3) {
-      // Reached the end of a line
-      __HAL_TIM_DISABLE(&vga_pixel_timer);
-      LL_GPIO_ResetOutputPin(VGA_PIXEL_GPIO_Port, VGA_PIXEL_ALL_PINS);
-      HAL_DMA_Abort(&vga_pixel_dma);
-      __HAL_DMA_DISABLE(&vga_pixel_dma); // flush the FIFO
-      __HAL_TIM_SET_COUNTER(&vga_pixel_timer, 0);
-      swap_dma_buffers();
-      HAL_DMA_Start(
-        &vga_pixel_dma, (usize)dma_frontbuf->data, (usize)&VGA_PIXEL_GPIO_Port->BSRR, FRAME_WIDTH
-      );
-      LL_GPIO_ResetOutputPin(VGA_PIXEL_GPIO_Port, VGA_PIXEL_ALL_PINS);
-    } else if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_1) {
-      // At the start of a new line
-      if (__HAL_TIM_GET_COUNTER(&vga_vsync_timer) - 33 < 480) {
-        line_paint_request = true;
-      }
-    }
-  } else if (htim->Instance == TIM9) {
-    if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_1) {
-      frame_counter++;
-      if (frame_counter % 2 == 0) {
-        next_frame_request = true;
-      }
-    }
   }
 }
 

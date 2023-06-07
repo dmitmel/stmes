@@ -49,8 +49,7 @@ __USED void DMA2_Stream6_IRQHandler(void) {
 }
 
 __USED void TIM1_BRK_TIM9_IRQHandler(void) {
-  HAL_TIM_IRQHandler(&vga_vsync_timer);
-  HAL_TIM_IRQHandler(&vga_pixel_timer);
+  vga_vsync_timer_isr();
 }
 
 __USED void TIM2_IRQHandler(void) {
@@ -58,5 +57,5 @@ __USED void TIM2_IRQHandler(void) {
 }
 
 __USED void TIM3_IRQHandler(void) {
-  HAL_TIM_IRQHandler(&vga_hsync_timer);
+  vga_hsync_timer_isr();
 }

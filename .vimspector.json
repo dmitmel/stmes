@@ -1,6 +1,19 @@
 {
   "$schema": "https://puremourning.github.io/vimspector/schema/vimspector.schema.json",
   "configurations": {
+    "debug platformio build": {
+      "adapter": "debugpy",
+      "configuration": {
+        "request": "launch",
+        "cwd": "${workspaceRoot}",
+        "module": "platformio",
+        "args": ["*${args:run -e debug}"],
+        "console": "integratedTerminal",
+        "justMyCode": false,
+        "stopOnEntry": true
+      }
+    },
+
     "attach and reset": {
       "adapter": "vscode-cpptools",
 

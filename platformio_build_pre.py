@@ -24,7 +24,12 @@ env.Append(CPPDEFINES=["USE_FULL_LL_DRIVER"])
 # includes macros. By default only level 2 is enabled.
 env.Replace(PIODEBUGFLAGS=["-Og", "-ggdb3"])
 
+# clangd gets confused by optimization options clang itself doesn't have, so
+# avoid including them in `compile_commands.json`.
 if "compiledb" not in COMMAND_LINE_TARGETS and not env.IsIntegrationDump():
+  # GCC optimization options:
+  # <https://gcc.gnu.org/onlinedocs/gcc-9.5.0/gcc/Optimize-Options.html>
+  # <https://github.com/gcc-mirror/gcc/blob/releases/gcc-9.2.0/gcc/opts.c#L443>
   env.Append(
     PIODEBUGFLAGS=[
       # These are not enabled by -Og

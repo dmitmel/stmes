@@ -2,10 +2,10 @@ import struct
 
 from PIL import Image
 
-FRAME_COUNT = 6572
+FRAME_COUNT = 2155
 COLOR_BITS = 3
-IMAGE_WIDTH = 480
-IMAGE_HEIGHT = 360
+IMAGE_WIDTH = 320
+IMAGE_HEIGHT = 240
 FILE_SIZE_LIMIT = 4 * 1024 * 1024 * 1024
 
 
@@ -41,13 +41,13 @@ while frame_idx < FRAME_COUNT:
   while frame_idx < FRAME_COUNT and struct.calcsize(pack_format()) <= FILE_SIZE_LIMIT:
     frame_idx += 1
     batch_frame_idx += 1
-    img_path = f"apple/frames/{frame_idx:04d}.png"
+    img_path = f"bebop/frames/{frame_idx:04d}.png"
     print(frame_idx, batch_idx, batch_frame_idx)
 
     img = Image.open(img_path).resize((IMAGE_WIDTH, IMAGE_HEIGHT), Image.LANCZOS)
-    img = img.convert("L").point(lambda x: x >> (8 - COLOR_BITS), mode="1")
+    # img = img.convert("L").point(lambda x: x >> (8 - COLOR_BITS), mode="1")
     width, height = img.size
-    img_data = list(img.getdata(0))
+    img_data = list(((r >> 7) << 2) | ((g >> 7) << 1) | (b >> 7) for r, g, b in img.getdata())
 
     while len(prev_frame_rows) < height:
       prev_frame_rows.append([])
@@ -127,7 +127,7 @@ while frame_idx < FRAME_COUNT:
     frame_lengths.append(frame_len)
 
   batch_idx += 1
-  with open(f"apple/encoded/{batch_idx:04d}.bin", "wb") as out:
+  with open(f"bebop/encoded/{batch_idx:04d}.bin", "wb") as out:
     bin_data = struct.pack(
       pack_format(),
       IMAGE_WIDTH,
