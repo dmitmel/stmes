@@ -1,2 +1,3 @@
 cubemx/** linguist-generated
 lib/FatFS/** linguist-vendored
+src/stmes/video/console_font.[ch] linguist-generated
