@@ -23,6 +23,8 @@ jobs:
             v1-${{ github.workflow }}-${{ runner.os }}-platformio-
 
       - run: python -m pip install --upgrade pip
-      - run: pip install --upgrade platformio
+      - run: pip install --upgrade platformio elf-size-analyze
       - run: pio pkg install
+      - run: pio run -e debug
       - run: pio run -e release
+      - run: elf-size-analyze --rom --ram ./.pio/build/debug/firmware.elf
