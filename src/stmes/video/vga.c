@@ -140,7 +140,6 @@ void vga_init(void) {
     check_hal_error(HAL_TIMEx_MasterConfigSynchronization(htim, &master_init));
 
     __HAL_LINKDMA(&vga_pixel_timer, hdma[TIM_DMA_ID_UPDATE], vga_pixel_dma);
-    __HAL_TIM_ENABLE_DMA(&vga_pixel_timer, TIM_DMA_UPDATE);
   }
 
   {
@@ -224,12 +223,6 @@ void vga_init(void) {
       .InputTrigger = TIM_TS_ITR1,
     };
     check_hal_error(HAL_TIM_SlaveConfigSynchro(htim, &slave_init));
-
-    TIM_MasterConfigTypeDef master_init = {
-      .MasterOutputTrigger = TIM_TRGO_RESET,
-      .MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE,
-    };
-    check_hal_error(HAL_TIMEx_MasterConfigSynchronization(htim, &master_init));
 
     TIM_OC_InitTypeDef channel1_init = {
       .OCMode = TIM_OCMODE_TIMING,
@@ -416,11 +409,25 @@ __STATIC_FORCEINLINE void vga_on_line_end_reached(void) {
   }
   if (unlikely(!should_render)) return;
 
-  LL_TIM_SetCounter(pixel_tim, 0); // Prepare the pixel timer for restart
+  // Prepare the pixel timer for restart. First, we want to apply the requested
+  // scanline parameters:
+  // TODO: scanline offset can be accomplished by abusing the autoreload
+  // preload setting, which effectively turns the ARR register into a memory
+  // cell for one timer tick.
   LL_TIM_SetPrescaler(pixel_tim, current_scanline.pixel_scale);
-  LL_TIM_GenerateEvent_UPDATE(pixel_tim); // Apply the prescaler change
+  // The prescaler changes are applied only on the following UPDATE event, so
+  // we must generate one ourselves:
+  LL_TIM_GenerateEvent_UPDATE(pixel_tim);
+  // Forcing an UPDATE event won't start the counter, though it will reset it.
+  // However, we want the pixel DMA to be started without any delay, so we set
+  // the counter to a value that will cause a reload immediately upon restart.
+  LL_TIM_SetCounter(pixel_tim, LL_TIM_GetAutoReload(pixel_tim));
 
-  // And enable the DMA stream. It will actually be started when the pixel
+  // Clear any leftover DMA requests from the timer...
+  LL_TIM_DisableDMAReq_UPDATE(pixel_tim);
+  LL_TIM_EnableDMAReq_UPDATE(pixel_tim);
+
+  // ..and enable the DMA stream. It will actually be started when the pixel
   // timer starts ticking at the beginning of the next line.
   vga_start_pixel_dma(current_scanline.buffer, current_scanline.length);
 }

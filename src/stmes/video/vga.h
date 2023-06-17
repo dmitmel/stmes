@@ -19,6 +19,7 @@ struct VgaTimings {
 extern const struct VgaTimings VGA_TIMINGS_640x480_57hz;
 extern const struct VgaTimings VGA_TIMINGS_640x480_60hz;
 extern const struct VgaTimings VGA_TIMINGS_800x600_60hz;
+extern const struct VgaTimings VGA_TIMINGS_1024x768_60hz;
 
 // Ensure the alignment, so that ldmia/stmia instructions can be used for
 // copying these. See <https://gcc.gnu.org/bugzilla/show_bug.cgi?id=57648>.
