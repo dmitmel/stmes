@@ -28,6 +28,10 @@ static u32 console_palette[16] = {
   0x444, 0x800, 0x080, 0x880, 0x008, 0x808, 0x088, 0x888,
 };
 
+u8 console_get_current_color(void) {
+  return console_buffer.current_text_attrs;
+}
+
 void console_set_color(u8 color) {
   console_buffer.current_text_attrs = color;
 }
@@ -45,6 +49,11 @@ void console_clear_line(u8 line) {
   fast_memset_u32(
     self->text_attrs[line], self->current_text_attrs * SMEAR_8x4, SIZEOF(self->text_attrs[0])
   );
+}
+
+void console_clear_cursor_line(void) {
+  struct ConsoleBuffer* self = &console_buffer;
+  console_clear_line(self->cursor_line);
 }
 
 void console_clear_screen(void) {
@@ -65,7 +74,7 @@ void console_new_line(void) {
   }
 }
 
-void console_feed_char(char c) {
+void console_putchar(char c) {
   struct ConsoleBuffer* self = &console_buffer;
   if (c == '\n') {
     console_new_line();
@@ -77,6 +86,12 @@ void console_feed_char(char c) {
       self->cursor_col = 0;
       console_new_line();
     }
+  }
+}
+
+void console_print(const char* str) {
+  while (*str != 0) {
+    console_putchar(*str++);
   }
 }
 
@@ -199,30 +214,6 @@ void console_init(void) {
     console_palette[i] = rgb12_to_vga_pins(console_palette[i]);
   }
   console_clear_screen();
-
-  static struct {
-    u8 color;
-    const char* str;
-  } code_tokens[] = {
-    // clang-format off
-    {5, "#include"}, {7, " "}, {2, "<stdio.h>"}, {7, "\n"},
-    {5, "#include"}, {7, " "}, {2, "<stm32f4xx_hal.h>"}, {6, "\n"},
-    {3, "int"}, {7, " "}, {4, "main"}, {7, "("}, {3, "int"}, {7, " "}, {1, "argc"}, {7, ", "}, {3, "char"}, {7, " "}, {1, "argv"}, {7, "[]"}, {7, ") {\n"},
-    {7, "  "}, {4, "printf"}, {7, "("}, {2, "\"Hello world from STM32!"}, {3, "\\n"}, {2, "\""}, {7, ");\n"},
-    {7, "  "}, {5, "while"}, {7, " ("}, {3, "true"}, {7, ") {\n"},
-    {7, "    "}, {4, "HAL_GPIO_TogglePin"}, {7, "("}, {3, "GPIOC"}, {7, ", "}, {3, "GPIO_PIN_13"}, {7, ");\n"},
-    {7, "    "}, {4, "HAL_Delay"}, {7, "("}, {3, "100"}, {7, ");\n"},
-    {7, "  }\n"},
-    {7, "  "}, {5, "return"}, {7, " "}, {3, "0"}, {7, ";\n"},
-    {7, "}\n"},
-    // clang-format on
-  };
-
-  for (usize i = 0; i < SIZEOF(code_tokens); i++) {
-    console_set_color(code_tokens[i].color);
-    printf("%s", code_tokens[i].str);
-    fflush(stdout);
-  }
 }
 
 __NO_RETURN void console_main_loop(void) {

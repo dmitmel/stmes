@@ -52,9 +52,6 @@ typedef uintptr_t usize;
 typedef float f32;
 typedef double f64;
 
-#define check_hal_error(expr) (unlikely((expr) != HAL_OK) ? Error_Handler() : (void)0)
-#define check_fs_error(expr) (unlikely((expr) != FR_OK) ? Error_Handler() : (void)0)
-
 void fast_memset_u8(u8* dst, u8 val, usize n);
 void fast_memset_u32(u32* dst, u32 val, usize n);
 void fast_memcpy_u8(u8* dst, const u8* src, usize n);

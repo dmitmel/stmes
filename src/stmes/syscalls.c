@@ -33,7 +33,7 @@ __USED void* _sbrk(ptrdiff_t incr) {
 int _write(int fd, const char* buf, size_t len) {
   if (fd == STDOUT_FILENO || fd == STDERR_FILENO) {
     for (const char* end = buf + len; buf != end; buf++) {
-      console_feed_char(*buf);
+      console_putchar(*buf);
     }
     return len;
   } else {

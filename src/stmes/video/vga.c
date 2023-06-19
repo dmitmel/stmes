@@ -1,6 +1,6 @@
 #include "stmes/video/vga.h"
 #include "stmes/gpio.h"
-#include "stmes/main.h"
+#include "stmes/kernel/crash.h"
 #include "stmes/utils.h"
 #include <math.h>
 #include <stdio.h>

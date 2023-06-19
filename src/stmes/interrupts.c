@@ -1,6 +1,5 @@
 #include "stmes/interrupts.h"
 #include "stmes/dma.h"
-#include "stmes/main.h"
 #include "stmes/sdio.h"
 #include "stmes/timers.h"
 #include "stmes/video/vga.h"
@@ -8,22 +7,6 @@
 
 __USED void NMI_Handler(void) {
   while (true) {}
-}
-
-__USED void HardFault_Handler(void) {
-  Error_Handler();
-}
-
-__USED void MemManage_Handler(void) {
-  Error_Handler();
-}
-
-__USED void BusFault_Handler(void) {
-  Error_Handler();
-}
-
-__USED void UsageFault_Handler(void) {
-  Error_Handler();
 }
 
 __USED void SVC_Handler(void) {}

@@ -1,6 +1,9 @@
+#include "stmes/fatfs.h"
+#include "stmes/kernel/crash.h"
 #include "stmes/sdio.h"
 #include "stmes/utils.h"
 #include <ff.h>
+#include <stdio.h>
 #include <stm32f4xx_hal.h>
 
 #include <diskio.h>
@@ -172,4 +175,33 @@ void HAL_SD_AbortCallback(SD_HandleTypeDef* hsd) {
 
 void HAL_SD_ErrorCallback(SD_HandleTypeDef* hsd) {
   UNUSED(hsd);
+}
+
+__NO_RETURN void crash_on_fs_error(FRESULT code, const char* file, u32 line) {
+  static const char* const ERROR_NAMES[] = {
+    [FR_OK] = "OK",
+    [FR_DISK_ERR] = "DISK_ERR",
+    [FR_INT_ERR] = "INT_ERR",
+    [FR_NOT_READY] = "NOT_READY",
+    [FR_NO_FILE] = "NO_FILE",
+    [FR_NO_PATH] = "NO_PATH",
+    [FR_INVALID_NAME] = "INVALID_NAME",
+    [FR_DENIED] = "DENIED",
+    [FR_EXIST] = "EXIST",
+    [FR_INVALID_OBJECT] = "INVALID_OBJECT",
+    [FR_WRITE_PROTECTED] = "WRITE_PROTECTED",
+    [FR_INVALID_DRIVE] = "INVALID_DRIVE",
+    [FR_NOT_ENABLED] = "NOT_ENABLED",
+    [FR_NO_FILESYSTEM] = "NO_FILESYSTEM",
+    [FR_MKFS_ABORTED] = "MKFS_ABORTED",
+    [FR_TIMEOUT] = "TIMEOUT",
+    [FR_LOCKED] = "LOCKED",
+    [FR_NOT_ENOUGH_CORE] = "NOT_ENOUGH_CORE",
+    [FR_TOO_MANY_OPEN_FILES] = "TOO_MANY_OPEN_FILES",
+    [FR_INVALID_PARAMETER] = "INVALID_PARAMETER",
+  };
+  const char* name = (u32)code < SIZEOF(ERROR_NAMES) ? ERROR_NAMES[code] : "UNKNOWN";
+  char msg[32];
+  snprintf(msg, sizeof(msg), "0x%02" PRIX32 "/FR_%s", (u32)code, name);
+  crash(msg, file, line);
 }

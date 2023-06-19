@@ -1,6 +1,16 @@
+import os
+
 from SCons.Script import COMMAND_LINE_TARGETS
 
 Import("env")
+
+board = env.BoardConfig()
+platform = env.PioPlatform()
+
+MCU = board.get("build.mcu", "")
+MCU_FAMILY = MCU[0:7]
+
+FRAMEWORK_DIR = platform.get_package_dir("framework-stm32cube%s" % MCU[5:7])
 
 
 def normalize_bool_option(value):
@@ -37,3 +47,23 @@ if "compiledb" not in COMMAND_LINE_TARGETS and not env.IsIntegrationDump():
       "-fif-conversion2",  # Convert ifs into instructions with condition flags
     ]
   )
+
+
+# Adds a flag for substituting a given path with a shorter string in expansions
+# of the __FILE__ preprocessor variable (most notably used by the assertion
+# macros), which has significant impact on the executable size.
+def macro_remap_dir(path, replacement=None):
+  replacement = replacement or os.path.basename(path)
+  flags = ["-fmacro-prefix-map={}={}".format(path, replacement)]
+  env.Append(CCFLAGS=flags, ASFLAGS=flags)
+
+
+macro_remap_dir(os.path.join("$PROJECT_DIR", ""), "")
+macro_remap_dir(os.path.join("$PROJECT_DIR", "src", "stmes"))
+macro_remap_dir(os.path.join("src", "stmes"))
+macro_remap_dir(
+  os.path.join(FRAMEWORK_DIR, "Drivers",
+               MCU_FAMILY.upper() + "xx_HAL_Driver", "Src", ""), ""
+)
+
+env.Append(CCFLAGS=["-mno-unaligned-access"])

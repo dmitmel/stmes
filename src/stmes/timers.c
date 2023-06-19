@@ -1,6 +1,5 @@
 #include "stmes/timers.h"
-#include "stmes/main.h"
-#include "stmes/utils.h"
+#include "stmes/kernel/crash.h"
 #include <stm32f4xx_hal.h>
 
 TIM_HandleTypeDef htim2;

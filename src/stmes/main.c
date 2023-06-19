@@ -1,6 +1,8 @@
 #include "stmes/main.h"
 #include "stmes/dma.h"
+#include "stmes/fatfs.h"
 #include "stmes/gpio.h"
+#include "stmes/kernel/crash.h"
 #include "stmes/sdio.h"
 #include "stmes/timers.h"
 #include "stmes/utils.h"
@@ -11,12 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stm32f4xx_hal.h>
-#include <stm32f4xx_ll_dma.h>
-#include <stm32f4xx_ll_gpio.h>
-#include <stm32f4xx_ll_tim.h>
 #include <string.h>
-
-extern void initialise_monitor_handles(void);
 
 struct BufferedReader {
   u8 buffer[BLOCKSIZE * 8];
@@ -26,9 +23,7 @@ struct BufferedReader {
 
 static u8* buffered_read(struct BufferedReader* self, FIL* file, FSIZE_t pos, FSIZE_t len) {
   const FSIZE_t capacity = SIZEOF(self->buffer);
-  if (unlikely(len > capacity)) {
-    Error_Handler();
-  }
+  ASSERT(len <= capacity);
   if (unlikely(!(self->offset_start <= pos && pos + len <= self->offset_end))) {
     self->offset_start = pos & ~(BLOCKSIZE - 1); // align to 512-byte boundaries
     self->offset_end = self->offset_start;
@@ -38,16 +33,17 @@ static u8* buffered_read(struct BufferedReader* self, FIL* file, FSIZE_t pos, FS
     UINT bytes_read;
     check_fs_error(f_read(file, self->buffer, capacity, &bytes_read));
     self->offset_end = self->offset_start + bytes_read;
-    if (unlikely(!(self->offset_start <= pos && pos + len <= self->offset_end))) {
-      Error_Handler();
-    }
+    ASSERT(self->offset_start <= pos && pos + len <= self->offset_end);
   }
   return &self->buffer[pos - self->offset_start];
 }
 
 int main(void) {
+  crash_init_hard_faults();
+
   // Enable the internal CPU cycle counter.
-  // <https://developer.arm.com/documentation/ddi0403/d/Debug-Architecture/ARMv7-M-Debug/The-Data-Watchpoint-and-Trace-unit/CYCCNT-cycle-counter-and-related-timers?lang=en>
+  // <https://developer.arm.com/documentation/ddi0403/d/Debug-Architecture/ARMv7-M-Debug/The-Data-Watchpoint-and-Trace-unit/CYCCNT-cycle-counter-and-related-timers>
+  // <https://developer.arm.com/documentation/ka001499/latest> - getting accurate executed instruction counts
   CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
   DWT->CYCCNT = 0;
   DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
@@ -55,6 +51,7 @@ int main(void) {
 #ifdef ARM_SEMIHOSTING_ENABLE
   // Actually enable the semihosting machinery only when the debugger is attached.
   if (CoreDebug->DHCSR & CoreDebug_DHCSR_C_DEBUGEN_Msk) {
+    extern void initialise_monitor_handles(void);
     initialise_monitor_handles();
   }
 #endif
@@ -66,18 +63,16 @@ int main(void) {
 
   MX_GPIO_Init();
   MX_DMA_Init();
-  MX_TIM2_Init();
   MX_SDIO_SD_Init();
 
   vga_init();
+  vga_apply_timings(&VGA_TIMINGS_640x480_57hz);
+  vga_start();
 
   HAL_StatusTypeDef hal_status;
   while ((hal_status = BSP_SD_Init()) != HAL_OK) {
     HAL_Delay(200);
   }
-
-  vga_apply_timings(&VGA_TIMINGS_640x480_57hz);
-  vga_start();
 
   static FATFS SDFatFS;
   static FIL SDFile;
@@ -85,6 +80,29 @@ int main(void) {
 
   static DIR SDDir;
   check_fs_error(f_opendir(&SDDir, "/"));
+
+  static struct {
+    u8 color;
+    const char* str;
+  } code_tokens[] = {
+    // clang-format off
+    {5, "#include"}, {7, " "}, {2, "<stdio.h>"}, {7, "\n"},
+    {5, "#include"}, {7, " "}, {2, "<stm32f4xx_hal.h>"}, {6, "\n"},
+    {3, "int"}, {7, " "}, {4, "main"}, {7, "("}, {3, "int"}, {7, " "}, {1, "argc"}, {7, ", "}, {3, "char"}, {7, " "}, {1, "argv"}, {7, "[]"}, {7, ") {\n"},
+    {7, "  "}, {4, "printf"}, {7, "("}, {2, "\"Hello world from STM32!"}, {3, "\\n"}, {2, "\""}, {7, ");\n"},
+    {7, "  "}, {5, "while"}, {7, " ("}, {3, "true"}, {7, ") {\n"},
+    {7, "    "}, {4, "HAL_GPIO_TogglePin"}, {7, "("}, {3, "GPIOC"}, {7, ", "}, {3, "GPIO_PIN_13"}, {7, ");\n"},
+    {7, "    "}, {4, "HAL_Delay"}, {7, "("}, {3, "100"}, {7, ");\n"},
+    {7, "  }\n"},
+    {7, "  "}, {5, "return"}, {7, " "}, {3, "0"}, {7, ";\n"},
+    {7, "}\n"},
+    // clang-format on
+  };
+
+  for (usize i = 0; i < SIZEOF(code_tokens); i++) {
+    console_set_color(code_tokens[i].color);
+    console_print(code_tokens[i].str);
+  }
 
   while (true) {
     __WAIT_FOR_INTERRUPT();
@@ -148,9 +166,7 @@ int main(void) {
   FSIZE_t video_pixels_start = video_ptr;
   FSIZE_t video_pixels_size = sizeof(u8) * video_header.pixels_len;
   video_ptr += video_pixels_size;
-  if (video_ptr != video_file_len) {
-    Error_Handler();
-  }
+  ASSERT(video_ptr == video_file_len);
 
   static struct frame_row {
     u8* data;
@@ -161,6 +177,7 @@ int main(void) {
     row->len = 0;
     row->cap = 8;
     row->data = malloc(sizeof(*row->data) * row->cap);
+    ASSERT(row->data != NULL);
   }
 
   usize frame_nr = 0, frame_counter = 0;
@@ -254,6 +271,7 @@ int main(void) {
           row->len = common + row_len;
           if (row->cap < row->len) {
             row->data = realloc(row->data, sizeof(*row->data) * row->len);
+            ASSERT(row->data != NULL);
             row->cap = row->len;
           }
 
@@ -294,16 +312,14 @@ int main(void) {
         for (u32 i = 0; i < row->len; i++) {
           u8 encoded = row->data[i];
           u32 repeats = (encoded >> 3) + 1;
-          u32 color = video_palette[(encoded & 0x7)];
+          u32 color = video_palette[encoded & 0x7];
           if (color != prev_color) {
             pixel_dma_buf_set(backbuf, pixel_idx, color);
             prev_color = color;
           }
           pixel_idx += repeats;
         }
-        if (pixel_idx > FRAME_WIDTH) {
-          Error_Handler();
-        }
+        ASSERT(pixel_idx <= FRAME_WIDTH);
         if (pixel_idx < FRAME_WIDTH) {
           pixel_dma_buf_set(backbuf, pixel_idx, VGA_PIXEL_ALL_PINS_RESET);
         }
@@ -359,20 +375,3 @@ HAL_StatusTypeDef HAL_InitTick(u32 priority) {
 u32 HAL_GetTick(void) {
   return TIM2->CNT / 2;
 }
-
-__NO_RETURN void Error_Handler(void) {
-  __disable_irq();
-  while (true) {
-    const u32 blink_delay = 200;
-    LL_GPIO_SetOutputPin(BLTN_LED_GPIO_Port, BLTN_LED_Pin);
-    HAL_Delay(blink_delay);
-    LL_GPIO_ResetOutputPin(BLTN_LED_GPIO_Port, BLTN_LED_Pin);
-    HAL_Delay(blink_delay);
-  }
-}
-
-#ifdef USE_FULL_ASSERT
-void assert_failed(u8* file, u32 line) {
-  // printf("Wrong parameters value: file %s on line %d\r\n", file, line)
-}
-#endif
