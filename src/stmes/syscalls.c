@@ -2,6 +2,7 @@
 #include "stmes/utils.h"
 #include "stmes/video/console.h"
 #include <errno.h>
+#include <printf.h>
 #include <unistd.h>
 
 __USED void* _sbrk(ptrdiff_t incr) {
@@ -40,4 +41,8 @@ int _write(int fd, const char* buf, size_t len) {
     errno = EBADF;
     return -1;
   }
+}
+
+void _putchar(char c) {
+  console_putchar(c);
 }

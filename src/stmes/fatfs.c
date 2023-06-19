@@ -3,7 +3,7 @@
 #include "stmes/sdio.h"
 #include "stmes/utils.h"
 #include <ff.h>
-#include <stdio.h>
+#include <printf.h>
 #include <stm32f4xx_hal.h>
 
 #include <diskio.h>

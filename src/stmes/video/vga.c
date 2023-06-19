@@ -3,8 +3,7 @@
 #include "stmes/kernel/crash.h"
 #include "stmes/utils.h"
 #include <math.h>
-#include <stdio.h>
-#include <stm32f4xx.h>
+#include <stm32f4xx_hal.h>
 #include <stm32f4xx_ll_dma.h>
 #include <stm32f4xx_ll_gpio.h>
 #include <stm32f4xx_ll_rcc.h>

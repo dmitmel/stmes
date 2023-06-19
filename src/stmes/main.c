@@ -10,7 +10,7 @@
 #include "stmes/video/framebuf.h"
 #include "stmes/video/vga.h"
 #include <ff.h>
-#include <stdio.h>
+#include <printf.h>
 #include <stdlib.h>
 #include <stm32f4xx_hal.h>
 #include <string.h>

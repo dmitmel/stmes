@@ -3,7 +3,7 @@
 #include "stmes/video/console_font.h"
 #include "stmes/video/framebuf.h"
 #include "stmes/video/vga.h"
-#include <stdio.h>
+#include <printf.h>
 
 // Multiplying a byte by this constant will duplicate it across the byte lanes.
 #define SMEAR_8x4 0x01010101u
@@ -235,7 +235,6 @@ __NO_RETURN void console_main_loop(void) {
         for (usize i = 0; i < SIZEOF(row_timings); i++) {
           console_set_color(i % SIZEOF(console_palette));
           printf("%" PRIu32 " ", row_timings[i]);
-          fflush(stdout);
           min = MIN(min, row_timings[i]), max = MAX(max, row_timings[i]), sum += row_timings[i];
         }
         console_set_color(CONSOLE_TEXT_ATTRS_RESET);
@@ -243,7 +242,6 @@ __NO_RETURN void console_main_loop(void) {
         printf(
           "min: %" PRIu32 ", max: %" PRIu32 ", avg: %" PRIu32, min, max, sum / SIZEOF(row_timings)
         );
-        fflush(stdout);
         row_timings_count = 0;
       }
     }

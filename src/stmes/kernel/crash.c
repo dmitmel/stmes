@@ -64,7 +64,7 @@
 #include "stmes/utils.h"
 #include "stmes/video/console.h"
 #include "stmes/video/vga.h"
-#include <stdio.h>
+#include <printf.h>
 #include <stm32f4xx_hal.h>
 #include <stm32f4xx_ll_gpio.h>
 
