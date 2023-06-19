@@ -104,7 +104,7 @@ int main(void) {
     console_print(code_tokens[i].str);
   }
 
-  while (true) {
+  while (false) {
     __WAIT_FOR_INTERRUPT();
     u16 vga_line = 0;
     if (vga_take_scanline_request(&vga_line)) {
@@ -140,7 +140,7 @@ int main(void) {
     }
   }
 
-  check_fs_error(f_open(&SDFile, "bebop_color_3bit.bin", FA_READ));
+  check_fs_error(f_open(&SDFile, "bebop_palette.bin", FA_READ));
   FSIZE_t video_file_len = f_size(&SDFile);
 
   struct __PACKED video_header {
@@ -186,10 +186,7 @@ int main(void) {
   // Wait a bit for the display to initialize
   HAL_Delay(500);
 
-  static u32 video_palette[8] = { 0x000, 0x00F, 0x0F0, 0x0FF, 0xF00, 0xF0F, 0xFF0, 0xFFF };
-  for (usize i = 0; i < SIZEOF(video_palette); i++) {
-    video_palette[i] = rgb12_to_vga_pins(video_palette[i]);
-  }
+  u32 video_palette[8];
 
   while (true) {
     bool load_next_frame = false;
@@ -216,10 +213,16 @@ int main(void) {
       u16 deltas_len = __UNALIGNED_UINT16_READ(frame_ptr);
 
       static struct BufferedReader deltas_reader;
-      u8* deltas_ptr = buffered_read(
+      const u8* deltas_ptr = buffered_read(
         &deltas_reader, &SDFile, video_deltas_start + frame_deltas_offset, deltas_len
       );
-      u8* deltas_end = &deltas_ptr[deltas_len];
+      const u8* deltas_end = &deltas_ptr[deltas_len];
+
+      for (usize i = 0; i < SIZEOF(video_palette); i++, deltas_ptr += 3) {
+        u8 r8 = deltas_ptr[0], g8 = deltas_ptr[1], b8 = deltas_ptr[2];
+        u32 rgb12 = (r8 >> 4 << 8) | (g8 >> 4 << 4) | (b8 >> 4);
+        video_palette[i] = rgb12_to_vga_pins(rgb12);
+      }
 
       u16 row_y = -1;
       while (deltas_ptr != deltas_end) {
@@ -300,28 +303,23 @@ int main(void) {
       };
       vga_set_next_scanline(&scanline);
 
-      pixel_dma_buf_reset(backbuf);
-      pixel_dma_buf_set(backbuf, 0, VGA_PIXEL_ALL_PINS_RESET);
-      pixel_dma_buf_set(backbuf, FRAME_WIDTH - 1, VGA_PIXEL_ALL_PINS_RESET);
+      fast_memset_u32(backbuf->data, 0, FRAME_WIDTH - 1);
+      backbuf->data[0] = backbuf->data[FRAME_WIDTH - 1] = VGA_PIXEL_ALL_PINS_RESET;
 
       u32 video_y = vga_line / PIXEL_SCALE - (FRAME_HEIGHT - video_height) / 2;
       if (video_y < video_height) {
         struct frame_row* row = &frame_rows[video_y];
         usize pixel_idx = (FRAME_WIDTH - video_width) / 2;
-        u32 prev_color = 0;
         for (u32 i = 0; i < row->len; i++) {
           u8 encoded = row->data[i];
           u32 repeats = (encoded >> 3) + 1;
           u32 color = video_palette[encoded & 0x7];
-          if (color != prev_color) {
-            pixel_dma_buf_set(backbuf, pixel_idx, color);
-            prev_color = color;
-          }
+          backbuf->data[pixel_idx] = color;
           pixel_idx += repeats;
         }
         ASSERT(pixel_idx <= FRAME_WIDTH);
         if (pixel_idx < FRAME_WIDTH) {
-          pixel_dma_buf_set(backbuf, pixel_idx, VGA_PIXEL_ALL_PINS_RESET);
+          backbuf->data[pixel_idx] = VGA_PIXEL_ALL_PINS_RESET;
         }
       }
     }

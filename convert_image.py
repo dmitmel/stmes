@@ -4,6 +4,7 @@ from PIL import Image
 
 FRAME_COUNT = 2155
 COLOR_BITS = 3
+PALETTE_LEN = 1 << COLOR_BITS
 IMAGE_WIDTH = 320
 IMAGE_HEIGHT = 240
 FILE_SIZE_LIMIT = 4 * 1024 * 1024 * 1024
@@ -45,13 +46,18 @@ while frame_idx < FRAME_COUNT:
     print(frame_idx, batch_idx, batch_frame_idx)
 
     img = Image.open(img_path).resize((IMAGE_WIDTH, IMAGE_HEIGHT), Image.LANCZOS)
-    # img = img.convert("L").point(lambda x: x >> (8 - COLOR_BITS), mode="1")
+    img = img.quantize(colors=PALETTE_LEN, method=Image.Quantize.FASTOCTREE)
     width, height = img.size
-    img_data = list(((r >> 7) << 2) | ((g >> 7) << 1) | (b >> 7) for r, g, b in img.getdata())
 
     while len(prev_frame_rows) < height:
       prev_frame_rows.append([])
     frame_start = len(encoded_frames)
+
+    palette = img.getpalette("RGB")
+    assert palette is not None
+    palette = palette[:PALETTE_LEN * 3]
+    encoded_frames.extend(palette)
+    img_data = list(img.getdata())
 
     FLAG_REPEAT_PREVIOUS = 0x01
     FLAG_DUPLICATE_ROW = 0x02
