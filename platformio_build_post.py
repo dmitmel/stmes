@@ -5,6 +5,7 @@ projenv.Append(
     "-Wall",
     "-Wextra",
     "-Wpedantic",
+    "-Werror=return-type",
     "-Wdouble-promotion",
     "-Wmissing-declarations",
   ],

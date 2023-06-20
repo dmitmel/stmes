@@ -169,76 +169,40 @@ __NO_RETURN void crash(const char* message, const char* src_file, u32 src_line) 
   enter_crash_screen();
 }
 
-static u32 hardfault_handler_impl(u32 sp, u32 exc_return);
+static u32 hardfault_handler_impl(u32 exc_return, u32 msp, u32 psp);
 
-// Okay, here's where the interesting part starts. In short, here's the deal:
-// before entering an interrupt handler the CPU pushes some of the registers on
-// the stack (r0-r3, r12, lr, pc, xPSR, and if the FPU is enabled s0-s15 and
-// FPSCR, though the FP state stacking is a bit of a complicated topic), sets
-// the LR to a special marker value called EXC_RETURN, then jumps to the
-// corresponding handler, lets it run, and after it returns (by jumping to
-// EXC_RETURN, which really just means a normal `bx lr` or such), the CPU pops
-// (unstacks) the registers off the stack and proceeds to do what it was doing
-// before the interrupt has occurred. A notable consequence of this is that the
-// CPU hardware implements the ARM calling convention (AAPCS), meaning that the
-// ISRs can be written as normal C functions. What's more important is that we
-// can examine the pre-interrupt state ourselves by checking the stack (more
-// info here: <https://interrupt.memfault.com/blog/cortex-m-hardfault-debug>).
-// We need a bit of assembly to do that however, since we mustn't accidentally
-// mess up any of the registers, and C is kind of too high-level for that.
-// Fortunately C functions can be fully written in assembly by marking them as
-// `naked` - this disables the generation of a standard function prologue and
-// epilogue by the compiler, putting us in charge of maintaining the calling
-// convention and such. A couple of links on naked functions:
+// A wrapper around the real HardFault handler which saves the secondary
+// registers (only the general-purpose ones though) which aren't saved by the
+// hardware into the cpu_registers struct and arranges the stack pointer and
+// EXC_RETURN stuff. We need a bit of assembly to do this, however, since C is
+// kind of too high-level for that. Fortunately C functions can be fully
+// written in assembly by marking them as `naked` - this disables the
+// generation of a standard function prologue and epilogue by the compiler,
+// putting us in charge of maintaining the calling convention and such.
 // <https://stackoverflow.com/questions/33175120/access-c-non-pod-class-data-from-naked-asm-function>
 // <https://stackoverflow.com/questions/75699618/cortex-m4-svc-code-appears-to-always-pass-in-255-for-the-svc-number>
-//
-// More information on what happens on interrupt entry/return:
-// <https://interrupt.memfault.com/blog/cortex-m-hardfault-debug#registers-prior-to-exception>
-// <https://interrupt.memfault.com/blog/cortex-m-rtos-context-switching#context-state-stacking>
-//
-// Sections 2.3.2 "Exception types", 2.3.7 "Exception entry and return", 2.4
-// "Fault handling", 2.4.1 "Fault types", 2.4.2 "Fault escalation and hard
-// faults", 4.4.10-4.4.17 of PM0214 from STM give a more detailed explanation
-// and an overview of all related registers. AN209 from Keil gives all the
-// relevant excerpts with the exact same information in a single document.
-//
-// The exact specifications for ARMv7m can be found in sections B1.5 (in
-// particular B1.5.6 "Exception entry behavior", B1.5.7 "Stack alignment on
-// exception entry" and B1.5.8 "Exception return behavior"), B3.2.15-B3.2.19
-// and C1.6.1 of DDI0403E from ARM.
 static __attribute__((naked)) void hardfault_handler_entry(void) {
   __ASM volatile(
-    "cpsid i\n\t"             // __disable_irq()
-    "tst lr, #4\n\t"          // Bit 2 of EXC_RETURN determines which stack pointer was active
-    "ite eq\n\t"              // prior to the interrupt entry, use an If-Then-Else block to get it
-    "mrseq r0, msp\n\t"       // MSP if LR & 4 == 0
-    "mrsne r0, psp\n\t"       // PSP if LR & 4 != 0
-    "ldr r1, =%1\n\t"         // Load the pointer to cpu_registers
-    "adds r2, r1, #16\n\t"    // Get the pointer to cpu_registers.r4
-    "stmia r2!, {r4-r11}\n\t" // Store the temporary registers before using them
-    "mov r2, r0\n\t"          // Load all registers stacked by the CPU into temporaries (the
-    "ldmia r2!, {r4-r11}\n\t" // hardware ensures correct stack alignment, so we can use ldmia)
-    "mov r2, r1\n\t"          // Get the pointer to cpu_registers.r0
-    "stmia r2!, {r4-r7}\n\t"  // Store the stacked r0, r1, r2, r3
-    "adds r2, #32\n\t"        // Skip the already saved r4-r11
-    "mov r7, r8\n\t"          // Put r12 and SP into successive registers to be able to store
-    "mov r8, r0\n\t"          // them in one instruction, LR, PC and xPSR are already in r9-r11
-    "stmia r2!, {r7-r11}\n\t" // Store the stacked r12, SP, LR, PC, xPSR
-    "adds r2, r1, #16\n\t"    // Get the pointer to cpu_registers.r4 again
-    "ldmia r2!, {r4-r11}\n\t" // Restore the backed up temporaries
-    "ldr r1, =%2\n\t"         // Load the address of cpu_registers_collected
-    "movs r2, #1\n\t"         // Load the constant 1
-    "strb r2, [r1]\n\t"       // cpu_registers_collected = 1
-    "mov r1, lr\n\t"          // SP is already in r0 for the first argument, move LR into the
+    "cpsid i\n\t"            // __disable_irq()
+    "push {lr}\n\t"          // I don't think we should really be ascetic with the stack because
+                             // the MPU is turned off in fault handlers, so we won't get a stack
+    "ldr lr, =%1\n\t"        // overflow error. Anyway, back up the LR and use it to store the
+                             // address of cpu_registers.
+    "stmia lr, {r0-r12}\n\t" // Save all general-purpose registers (as you probably guessed by now,
+                             // so far this function closely mirrors crash_collect_registers).
+    "pop {lr}\n\t"           // Reload the backed up LR, which contains the EXC_RETURN value, and
+                             // also restore the active stack pointer to its original address.
+    "mrs r1, msp\n\t"        // Put the stack pointers into registers for arguments. We must do
+    "mrs r2, psp\n\t"        // this now because the `push` in the function prologue of the actual
+                             // handler written in C will shift them.
+    "mov r0, lr\n\t"         // Finally, place LR into the first argument register...
 #ifdef __PLATFORMIO_BUILD_DEBUG__
-    ".cfi_register lr,r1\n\t" // (this directive informs the debugger that LR's value is in r1)
+    ".cfi_register lr,r0\n\t" // (this directive informs the debugger that LR's value is in r0)
 #endif                        //
-    "bl %0\n\t"               // second argument register and call the actual handler
-    "bx r0\n\t" ::            // Use the return value as EXC_RETURN, letting the handler modify it
+    "bl %0\n\t"               // ...and we call the actual handler. We then use its return value
+    "bx r0\n\t" ::            // as EXC_RETURN, letting the handler alter it.
     "i"(&hardfault_handler_impl),
-    "i"(&crash_context.cpu_registers),
-    "i"(&crash_context.cpu_registers_collected)
+    "i"(&crash_context.cpu_registers)
   );
 }
 
@@ -258,25 +222,70 @@ __STATIC_INLINE bool validate_exc_return(u32 ret) {
   return false;
 }
 
+// Okay, here's where the interesting part begins. In short, here's the deal:
+// before entering an interrupt handler the CPU pushes some of the registers on
+// the stack (r0-r3, r12, lr, pc, xPSR, and, if the FPU is enabled, s0-s15 and
+// FPSCR, though the FP state stacking is a bit of a complicated topic), sets
+// the LR to a special marker value called EXC_RETURN, then jumps to the
+// corresponding handler, lets it run, and after it returns (by jumping to
+// EXC_RETURN, which really just means a normal `bx lr` or such), the CPU pops
+// (unstacks) the registers off the stack and proceeds to do what it was doing
+// before the interrupt has occurred. A notable consequence of this is that the
+// CPU hardware implements the ARM calling convention (AAPCS), meaning that the
+// ISRs can be written as normal C functions (they themselves will back up and
+// restore the other registers, as mandated by the convention). What's more
+// important is that we can examine the pre-interrupt state ourselves by
+// looking at the stack, and by editing it affect what happens after exiting
+// the interrupt.
+//
+// More information on what happens on interrupt entry/return:
+// <https://interrupt.memfault.com/blog/cortex-m-hardfault-debug#registers-prior-to-exception>
+// <https://interrupt.memfault.com/blog/cortex-m-rtos-context-switching#context-state-stacking>
+//
+// Sections 2.3.2 "Exception types", 2.3.7 "Exception entry and return", 2.4
+// "Fault handling", 2.4.1 "Fault types", 2.4.2 "Fault escalation and hard
+// faults", 4.4.10-4.4.17 of PM0214 from STM give a more detailed explanation
+// and an overview of all related registers. AN209 from Keil gives all the
+// relevant excerpts with the exact same information in a single document.
+//
+// The exact specifications for ARMv7m can be found in sections B1.5 (in
+// particular B1.5.6 "Exception entry behavior", B1.5.7 "Stack alignment on
+// exception entry" and B1.5.8 "Exception return behavior"), B3.2.15-B3.2.19
+// and C1.6.1 of DDI0403E from ARM.
+//
 // NOTE: Is called from inline assembly, which relies on the order of arguments!
 // TODO: Currently this function might not be able to handle a stack overflow
 // situation because the crash screen functions still require a few bytes of
-// stack for pushing the local registers. Perhaps we can change the stacks, or
-// extend the limit on the current stack?
-static u32 hardfault_handler_impl(u32 sp, u32 exc_return) {
+// stack for pushing the local registers. Perhaps we can exchange the stacks,
+// or extend the limit on the current stack?
+static u32 hardfault_handler_impl(u32 exc_return, u32 msp, u32 psp) {
   // Returning from this function will jump back to the code which generated
   // the fault, which is desirable in some cases, but may not always be
   // possible (since e.g. BusFaults may be imprecise). Also, I am pretty sure
   // the PC will point to the instruction that caused the fault, which may be
   // useful for retrying, but otherwise will cause an infinite loop.
 
-  // See PM0214 section 2.3.7.
-  struct ExceptionStackedRegisters {
-    u32 r0, r1, r2, r3, r12, lr, pc, xpsr;
-  }* stacked_regs = (void*)sp;
-
   crash_context.type = CRASH_TYPE_HARDFAULT;
   struct CrashHardfault* ctx = &crash_context.payload.hardfault;
+
+  // Bit 2 of EXC_RETURN determines which stack pointer was in use prior to
+  // entering the exception handler, which, consequently, contains the frame
+  // with the stacked registers.
+  u32 active_sp = (exc_return & 4) == 0 ? msp : psp;
+
+  // See PM0214 section 2.3.7. The hardware ensures correct stack alignment, so
+  // this struct doesn't need to have the __PACKED attribute (as suggested by
+  // the articles linked above).
+  struct ExceptionStackedRegisters {
+    u32 r0, r1, r2, r3, r12, lr, pc, xpsr;
+  }* stacked_regs = (void*)active_sp;
+
+  struct CrashCpuRegisters* regs = &crash_context.cpu_registers;
+  regs->r0 = stacked_regs->r0, regs->r1 = stacked_regs->r1, regs->r2 = stacked_regs->r2,
+  regs->r3 = stacked_regs->r3, regs->r12 = stacked_regs->r12, regs->lr = stacked_regs->lr,
+  regs->pc = stacked_regs->pc, regs->xpsr = stacked_regs->xpsr, regs->sp = active_sp;
+  // The wrapper function above has collected all other registers (r4-r11).
+  crash_context.cpu_registers_collected = 1;
 
   // The memory addresses should be read first, see the recommendations in
   // PM0214 section 4.4.18.
