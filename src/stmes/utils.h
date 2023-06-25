@@ -19,6 +19,14 @@ extern "C" {
 #define ceil_div(a, b) ((a) / (b) + ((a) % (b) != 0))
 #define round_div(a, b) ((a) / (b) + ((a) % (b) > (b) / 2))
 
+#define BIT(i) (1ul << (i))
+#define MASK(i) ((1ul << (i)) - 1)
+
+// clang-format off
+#define BITS4(a,b,c,d) ((a)<<3 | (b)<<2 | (c)<<1 | (d)<<0)
+#define BITS8(a,b,c,d,e,f,g,h) ((a)<<7 | (b)<<6 | (c)<<5 | (d)<<4 | (e)<<3 | (f)<<2 | (g)<<1 | (h)<<0)
+// clang-format on
+
 // clang-format off
 #define UNROLL_2(x) {x;x;}
 #define UNROLL_4(x) {x;x;x;x;}

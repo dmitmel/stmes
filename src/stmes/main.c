@@ -3,6 +3,7 @@
 #include "stmes/fatfs.h"
 #include "stmes/gpio.h"
 #include "stmes/kernel/crash.h"
+#include "stmes/kernel/mpu.h"
 #include "stmes/sdio.h"
 #include "stmes/timers.h"
 #include "stmes/utils.h"
@@ -40,6 +41,7 @@ static u8* buffered_read(struct BufferedReader* self, FIL* file, FSIZE_t pos, FS
 
 int main(void) {
   crash_init_hard_faults();
+  mpu_init();
 
   // Enable the internal CPU cycle counter.
   // <https://developer.arm.com/documentation/ddi0403/d/Debug-Architecture/ARMv7-M-Debug/The-Data-Watchpoint-and-Trace-unit/CYCCNT-cycle-counter-and-related-timers>

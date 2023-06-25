@@ -7,11 +7,9 @@
 
 __USED void* _sbrk(ptrdiff_t incr) {
   // These three are defined by the linker script
-  extern u8 _end;
-  extern u8 _estack;
-  extern u32 _Min_Stack_Size;
+  extern u8 _end, _estack, _Min_Stack_Size;
 
-  const u32 stack_limit = (u32)&_estack - (u32)&_Min_Stack_Size;
+  const usize stack_limit = (usize)&_estack - (usize)&_Min_Stack_Size;
   const u8* max_heap = (u8*)stack_limit;
   u8* prev_heap_end;
 

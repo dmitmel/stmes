@@ -11,7 +11,7 @@
 #define SD_TIMEOUT 3 * 1000
 #define SD_DEFAULT_BLOCK_SIZE 512
 
-__ALIGN_BEGIN static u8 dma_scratch[BLOCKSIZE] __ALIGN_END;
+static u8 dma_scratch[BLOCKSIZE] __ALIGNED(4);
 
 static volatile DSTATUS sd_status = STA_NOINIT;
 static volatile bool sd_write_done = false, sd_read_done = false;

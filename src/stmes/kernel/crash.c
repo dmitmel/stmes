@@ -51,6 +51,7 @@
 // <https://github.com/armink/CmBacktrace/blob/8d07e7ba078fbd57af89286fc217157bc9a6d2ac/cm_backtrace/cm_backtrace.c>
 // <https://github.com/MarlinFirmware/Marlin/tree/441416728cd7f0e9b6ebf94f895d1d27fe59d25a/Marlin/src/HAL/shared/backtrace>
 // <https://github.com/red-rocket-computing/backtrace>
+// <http://yosefk.com/blog/getting-the-call-stack-without-a-frame-pointer.html>
 
 // TODO: Add more CFI directives to the inline assembly because the debugger
 // probably won't be able to unwind and restore local variables correctly due
@@ -61,6 +62,7 @@
 
 #include "stmes/kernel/crash.h"
 #include "stmes/interrupts.h"
+#include "stmes/kernel/mpu.h"
 #include "stmes/utils.h"
 #include "stmes/video/console.h"
 #include "stmes/video/vga.h"
@@ -109,6 +111,7 @@ static struct CrashContext {
     struct CrashHardfault {
       // Maybe saving all of these registers is a bit redundant.
       u32 exc_return, cfsr, hfsr, dfsr, mmfar, bfar, afsr;
+      enum MpuFaultDiagnosis mpu_diagnosis;
     } hardfault;
   } payload;
 
@@ -186,8 +189,8 @@ static __attribute__((naked)) void hardfault_handler_entry(void) {
     "cpsid i\n\t"            // __disable_irq()
     "push {lr}\n\t"          // I don't think we should really be ascetic with the stack because
                              // the MPU is turned off in fault handlers, so we won't get a stack
-    "ldr lr, =%1\n\t"        // overflow error. Anyway, back up the LR and use it to store the
-                             // address of cpu_registers.
+    "ldr lr, =%1\n\t"        // overflow error here (at least yet). Anyway, back up the LR and use
+                             // it to store the address of cpu_registers.
     "stmia lr, {r0-r12}\n\t" // Save all general-purpose registers (as you probably guessed by now,
                              // so far this function closely mirrors crash_collect_registers).
     "pop {lr}\n\t"           // Reload the backed up LR, which contains the EXC_RETURN value, and
@@ -211,13 +214,13 @@ static __attribute__((naked)) void hardfault_handler_entry(void) {
 // <https://github.com/HotRays/zephyr/blob/a47cbffe1e3db496ed7667c84f0151666c5dfca2/arch/arm/core/fault.c#L46-L92>
 __STATIC_INLINE bool validate_exc_return(u32 ret) {
   ret = ~ret; // Comparing negated values produces shorter instructions.
-  if (ret == ~0xFFFFFFF1) return true;
-  if (ret == ~0xFFFFFFF9) return true;
-  if (ret == ~0xFFFFFFFD) return true;
+  if (ret == ~EXC_RETURN_HANDLER) return true;
+  if (ret == ~EXC_RETURN_THREAD_MSP) return true;
+  if (ret == ~EXC_RETURN_THREAD_PSP) return true;
 #if __FPU_PRESENT == 1
-  if (ret == ~0xFFFFFFE1) return true;
-  if (ret == ~0xFFFFFFE9) return true;
-  if (ret == ~0xFFFFFFED) return true;
+  if (ret == ~EXC_RETURN_HANDLER_FPU) return true;
+  if (ret == ~EXC_RETURN_THREAD_MSP_FPU) return true;
+  if (ret == ~EXC_RETURN_THREAD_PSP_FPU) return true;
 #endif
   return false;
 }
@@ -271,7 +274,7 @@ static u32 hardfault_handler_impl(u32 exc_return, u32 msp, u32 psp) {
   // Bit 2 of EXC_RETURN determines which stack pointer was in use prior to
   // entering the exception handler, which, consequently, contains the frame
   // with the stacked registers.
-  u32 active_sp = (exc_return & 4) == 0 ? msp : psp;
+  u32 active_sp = (exc_return & BIT(2)) == 0 ? msp : psp;
 
   // See PM0214 section 2.3.7. The hardware ensures correct stack alignment, so
   // this struct doesn't need to have the __PACKED attribute (as suggested by
@@ -295,6 +298,20 @@ static u32 hardfault_handler_impl(u32 exc_return, u32 msp, u32 psp) {
   ctx->cfsr = SCB->CFSR, ctx->hfsr = SCB->HFSR, ctx->dfsr = SCB->DFSR, ctx->afsr = SCB->AFSR;
 
   ctx->exc_return = exc_return;
+
+  ctx->mpu_diagnosis = MPU_FAULT_UNKNOWN;
+  if (ctx->cfsr & SCB_CFSR_MEMFAULTSR_Msk) {
+    u32 ipsr = regs->xpsr & 0x1FF;
+    // This won't tell apart unprivileged load instructions (LDR*T)... Not a
+    // big deal though.
+    bool privileged = ipsr != 0 || (__get_CONTROL() & CONTROL_nPRIV_Msk) == 0;
+    bool instruction_access = ctx->cfsr & SCB_CFSR_IACCVIOL_Msk;
+    if (instruction_access) {
+      ctx->mpu_diagnosis = mpu_diagnose_memfault(regs->pc, instruction_access, privileged);
+    } else if (ctx->cfsr & SCB_CFSR_MMARVALID_Msk) {
+      ctx->mpu_diagnosis = mpu_diagnose_memfault(ctx->mmfar, instruction_access, privileged);
+    }
+  }
 
   // The debug enabled flag doesn't get reset when the CPU is reset after the
   // debugger is disconnected, so this is not a good idea.
@@ -348,16 +365,16 @@ static u32 hardfault_handler_impl(u32 exc_return, u32 msp, u32 psp) {
     // below means "return to handler mode" (since we **definitely** got the
     // INVPC fault from another ISR), "the stack is MSP and doesn't contain
     // floating-point state".
-    exc_return = 0xFFFFFFF1;
+    exc_return = EXC_RETURN_HANDLER;
   }
 
   // In case we have received the fault from another interrupt handler (in
   // which case the bit 3 of EXC_RETURN will be unset), some care needs to be
   // taken to exit into the crash screen instead of the handler.
-  if ((exc_return & 0x8) == 0) {
+  if ((exc_return & BIT(3)) == 0) {
     // First, set the 3rd bit to indicate that we want to return into the
     // Thread mode. The bits relating to the stacked state are left as-is.
-    exc_return |= 0x8;
+    exc_return |= BIT(3);
     // Secondly, the hardware performs a bunch of checks on exception return to
     // ensure the processor will be put into a valid execution state (described
     // in section B1.5.8 of DDI0403E under the heading "Integrity checks on
@@ -368,6 +385,12 @@ static u32 hardfault_handler_impl(u32 exc_return, u32 msp, u32 psp) {
     // reliably clear the active status of every exception.
     SCB->CCR |= SCB_CCR_NONBASETHRDENA_Msk;
   }
+
+  // HACK: A temporary solution to recovery from stack overflows: let's just
+  // ignore the problem.
+  mpu_disable_region(MPU_REGION_STACK_BARRIER);
+
+  __set_CONTROL(__get_CONTROL() & ~CONTROL_nPRIV_Msk);
 
   // Data synchronization barrier: ensure that all memory writes have been
   // completed before we give control back to the hardware.
@@ -458,11 +481,11 @@ static void crash_screen_hardfault_reason(void) {
   u32 cfsr = ctx->cfsr, hfsr = ctx->hfsr;
 
   if (cfsr & SCB_CFSR_IACCVIOL_Msk) {
-    console_print("IACCVIOL/Instruction access violation at "), print_address(regs->pc);
+    console_print("IACCVIOL/Instruction access violation on "), print_address(regs->pc);
     console_putchar('\n');
   }
   if (cfsr & SCB_CFSR_DACCVIOL_Msk) {
-    console_print("DACCVIOL/Data access violation at "), print_address(ctx->mmfar);
+    console_print("DACCVIOL/Data access violation on "), print_address(ctx->mmfar);
     console_putchar('\n');
   }
   if (cfsr & SCB_CFSR_MUNSTKERR_Msk) {
@@ -528,12 +551,30 @@ static void crash_screen_hardfault_reason(void) {
   if (hfsr & SCB_HFSR_DEBUGEVT_Msk) {
     console_print("DEBUGEVT/The debug system is disabled\n");
   }
+}
 
-  if (cfsr & SCB_CFSR_MMARVALID_Msk) {
-    console_print("(the MemFault address register is valid)\n");
-  }
-  if (cfsr & SCB_CFSR_BFARVALID_Msk) {
-    console_print("(the BusFault address register is valid)\n");
+static void crash_screen_mpu_diagnosis(void) {
+  struct CrashHardfault* ctx = &crash_context.payload.hardfault;
+  if (ctx->mpu_diagnosis) {
+    console_print("MPU//");
+    switch (ctx->mpu_diagnosis) {
+      case MPU_FAULT_UNKNOWN: console_print("unknown\n"); break;
+      case MPU_FAULT_NULL_POINTER: console_print("NULL pointer error\n"); break;
+      case MPU_FAULT_STACK_OVERFLOW: console_print("stack overflow\n"); break;
+      case MPU_FAULT_NOT_MAPPED: console_print("access into an unmapped region\n"); break;
+      case MPU_FAULT_ACCESS_BLOCKED: console_print("access into region is blocked\n"); break;
+      case MPU_FAULT_WRITE_TO_READONLY: console_print("write to a readonly region\n"); break;
+      case MPU_FAULT_NOT_EXECUTABLE: console_print("jump into a non-executable region\n"); break;
+      case MPU_FAULT_UNPRIV_ACCESS_BLOCKED:
+        console_print("unprivileged access into region is blocked\n");
+        break;
+      case MPU_FAULT_UNPRIV_WRITE_TO_READONLY:
+        console_print("region is readonly for unprivileged access\n");
+        break;
+      case MPU_FAULT_UNPRIV_NOT_EXECUTABLE:
+        console_print("unprivileged execution from region is blocked\n");
+        break;
+    }
   }
 }
 
@@ -582,6 +623,7 @@ __NO_RETURN void enter_crash_screen(void) {
     console_print("[pc="), print_address((u32)ctx->address), console_print("]\n");
   } else if (crash_context.type == CRASH_TYPE_HARDFAULT) {
     crash_screen_hardfault_reason();
+    crash_screen_mpu_diagnosis();
   }
 
   console_putchar('\n');
@@ -622,9 +664,14 @@ __NO_RETURN void enter_crash_screen(void) {
     print_register("CSFR", ctx->cfsr), console_putchar(' ');
     print_register("HSFR", ctx->hfsr), console_putchar(' ');
     print_register("DSFR", ctx->dfsr), console_putchar('\n');
-    print_register("MFAR", ctx->mmfar), console_putchar(' ');
-    print_register("BFAR", ctx->bfar), console_putchar(' ');
-    print_register("AFSR", ctx->afsr), console_putchar('\n');
+    print_register("AFSR", ctx->afsr), console_putchar(' ');
+    if (ctx->cfsr & SCB_CFSR_MMARVALID_Msk) {
+      print_register("MFAR", ctx->mmfar), console_putchar(' ');
+    }
+    if (ctx->cfsr & SCB_CFSR_BFARVALID_Msk) {
+      print_register("BFAR", ctx->bfar), console_putchar(' ');
+    }
+    console_putchar('\n');
   } else {
     console_putchar('\n');
   }
