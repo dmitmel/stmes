@@ -36,9 +36,5 @@ __USED void TIM1_BRK_TIM9_IRQHandler(void) {
 }
 
 __USED void TIM2_IRQHandler(void) {
-  HAL_TIM_IRQHandler(&htim2);
-}
-
-__USED void TIM3_IRQHandler(void) {
   vga_hsync_timer_isr();
 }

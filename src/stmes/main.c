@@ -367,11 +367,7 @@ void SystemClock_Config(void) {
 
 HAL_StatusTypeDef HAL_InitTick(u32 priority) {
   UNUSED(priority);
-  MX_TIM2_Init();
-  check_hal_error(HAL_TIM_Base_Start(&htim2));
+  MX_TIM5_Init();
+  check_hal_error(HAL_TIM_Base_Start(&htim5));
   return HAL_OK;
-}
-
-u32 HAL_GetTick(void) {
-  return TIM2->CNT / 2;
 }

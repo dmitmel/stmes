@@ -63,12 +63,12 @@ void Error_Handler(void);
 #define BLTN_KEY_GPIO_Port GPIOA
 #define SDIO_CD_Pin GPIO_PIN_1
 #define SDIO_CD_GPIO_Port GPIOA
+#define VGA_HSYNC_Pin GPIO_PIN_2
+#define VGA_HSYNC_GPIO_Port GPIOA
 #define VGA_VSYNC_Pin GPIO_PIN_3
 #define VGA_VSYNC_GPIO_Port GPIOA
 #define SDIO_CMD_Pin GPIO_PIN_6
 #define SDIO_CMD_GPIO_Port GPIOA
-#define VGA_HSYNC_Pin GPIO_PIN_7
-#define VGA_HSYNC_GPIO_Port GPIOA
 #define VGA_PIXEL1_Pin GPIO_PIN_0
 #define VGA_PIXEL1_GPIO_Port GPIOB
 #define VGA_PIXEL2_Pin GPIO_PIN_1

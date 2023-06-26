@@ -67,7 +67,7 @@ static DMA_HandleTypeDef vga_pixel_dma;
 
 void vga_init(void) {
   __HAL_RCC_TIM1_CLK_ENABLE();
-  __HAL_RCC_TIM3_CLK_ENABLE();
+  __HAL_RCC_TIM2_CLK_ENABLE();
   __HAL_RCC_TIM9_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
@@ -75,8 +75,8 @@ void vga_init(void) {
 
   HAL_NVIC_SetPriority(TIM1_BRK_TIM9_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(TIM1_BRK_TIM9_IRQn);
-  HAL_NVIC_SetPriority(TIM3_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(TIM3_IRQn);
+  HAL_NVIC_SetPriority(TIM2_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(TIM2_IRQn);
 
   {
     LL_GPIO_ResetOutputPin(VGA_PIXEL_GPIO_Port, VGA_PIXEL_ALL_PINS);
@@ -128,7 +128,7 @@ void vga_init(void) {
 
     TIM_SlaveConfigTypeDef slave_init = {
       .SlaveMode = TIM_SLAVEMODE_TRIGGER,
-      .InputTrigger = TIM_TS_ITR2,
+      .InputTrigger = TIM_TS_ITR1,
     };
     check_hal_error(HAL_TIM_SlaveConfigSynchro(htim, &slave_init));
 
@@ -143,7 +143,7 @@ void vga_init(void) {
 
   {
     TIM_HandleTypeDef* htim = &vga_hsync_timer;
-    htim->Instance = TIM3;
+    htim->Instance = TIM2;
     htim->Init = (TIM_Base_InitTypeDef){
       .Prescaler = 0,
       .CounterMode = TIM_COUNTERMODE_UP,
@@ -177,28 +177,28 @@ void vga_init(void) {
     __HAL_TIM_ENABLE_OCxPRELOAD(htim, TIM_CHANNEL_1);
 
     TIM_OC_InitTypeDef channel2_init = {
-      .OCMode = TIM_OCMODE_PWM1,
-      .Pulse = 0,
-      .OCPolarity = TIM_OCPOLARITY_HIGH,
-      .OCFastMode = TIM_OCFAST_DISABLE,
-    };
-    check_hal_error(HAL_TIM_PWM_ConfigChannel(htim, &channel2_init, TIM_CHANNEL_2));
-
-    TIM_OC_InitTypeDef channel3_init = {
       .OCMode = TIM_OCMODE_TIMING,
       .Pulse = 0,
       .OCPolarity = TIM_OCPOLARITY_HIGH,
       .OCFastMode = TIM_OCFAST_DISABLE,
     };
-    check_hal_error(HAL_TIM_OC_ConfigChannel(htim, &channel3_init, TIM_CHANNEL_3));
-    __HAL_TIM_ENABLE_OCxPRELOAD(htim, TIM_CHANNEL_3);
+    check_hal_error(HAL_TIM_OC_ConfigChannel(htim, &channel2_init, TIM_CHANNEL_2));
+    __HAL_TIM_ENABLE_OCxPRELOAD(htim, TIM_CHANNEL_2);
+
+    TIM_OC_InitTypeDef channel3_init = {
+      .OCMode = TIM_OCMODE_PWM1,
+      .Pulse = 0,
+      .OCPolarity = TIM_OCPOLARITY_HIGH,
+      .OCFastMode = TIM_OCFAST_DISABLE,
+    };
+    check_hal_error(HAL_TIM_PWM_ConfigChannel(htim, &channel3_init, TIM_CHANNEL_3));
 
     GPIO_InitTypeDef gpio_init = {
       .Pin = VGA_HSYNC_Pin,
       .Mode = GPIO_MODE_AF_PP,
       .Pull = GPIO_NOPULL,
       .Speed = GPIO_SPEED_FREQ_LOW,
-      .Alternate = GPIO_AF2_TIM3,
+      .Alternate = GPIO_AF1_TIM2,
     };
     HAL_GPIO_Init(VGA_HSYNC_GPIO_Port, &gpio_init);
   }
@@ -219,7 +219,7 @@ void vga_init(void) {
 
     TIM_SlaveConfigTypeDef slave_init = {
       .SlaveMode = TIM_SLAVEMODE_EXTERNAL1,
-      .InputTrigger = TIM_TS_ITR1,
+      .InputTrigger = TIM_TS_ITR0,
     };
     check_hal_error(HAL_TIM_SlaveConfigSynchro(htim, &slave_init));
 
@@ -264,8 +264,8 @@ void vga_apply_timings(const struct VgaTimings* ts) {
   u32 apb2_freq = HAL_RCC_GetPCLK2Freq();
 
   TIM_TypeDef* pixel_tim = TIM1; // clocked from APB2
-  TIM_TypeDef* hsync_tim = TIM3; // clocked from APB1
-  TIM_TypeDef* vsync_tim = TIM9; // clocked from TIM3
+  TIM_TypeDef* hsync_tim = TIM2; // clocked from APB1
+  TIM_TypeDef* vsync_tim = TIM9; // clocked from TIM2
 
   u32 hsync_width = ABS(ts->hsync_pulse), vsync_width = ABS(ts->vsync_pulse),
       hsync_polarity = ts->hsync_pulse < 0 ? LL_TIM_OCPOLARITY_HIGH : LL_TIM_OCPOLARITY_LOW,
@@ -304,9 +304,9 @@ void vga_apply_timings(const struct VgaTimings* ts) {
   LL_TIM_SetPrescaler(hsync_tim, apb1_pixel_prescaler - 1);
   LL_TIM_SetAutoReload(hsync_tim, whole_line - 1);
   LL_TIM_OC_SetCompareCH1(hsync_tim, horz_back_porch);
-  LL_TIM_OC_SetCompareCH2(hsync_tim, whole_line - hsync_width);
-  LL_TIM_OC_SetPolarity(hsync_tim, LL_TIM_CHANNEL_CH2, hsync_polarity);
-  LL_TIM_OC_SetCompareCH3(hsync_tim, horz_back_porch + active_width);
+  LL_TIM_OC_SetCompareCH2(hsync_tim, horz_back_porch + active_width);
+  LL_TIM_OC_SetCompareCH3(hsync_tim, whole_line - hsync_width);
+  LL_TIM_OC_SetPolarity(hsync_tim, LL_TIM_CHANNEL_CH3, hsync_polarity);
 
   LL_TIM_SetPrescaler(vsync_tim, 0);
   LL_TIM_SetAutoReload(vsync_tim, whole_frame - 1);
@@ -329,14 +329,14 @@ void vga_start(void) {
   // Start the hsync timer. Nothing happens yet either.
   check_hal_error(HAL_TIM_Base_Start(&vga_hsync_timer));
   // The vsync timer is triggered by the channel 1, so at this point the MCU
-  // will begin generating the horizontal synchronization pulses.
+  // will begin generating the vertical synchronization pulses.
   check_hal_error(HAL_TIM_OC_Start(&vga_hsync_timer, TIM_CHANNEL_1));
-  // Now the MCU will start generating pulses on the vertical synchronization
+  // Now the MCU will start generating pulses on the horizontal synchronization
   // line, which is enough for the monitor to recognize the VGA resolution.
-  check_hal_error(HAL_TIM_PWM_Start(&vga_hsync_timer, TIM_CHANNEL_2));
+  check_hal_error(HAL_TIM_PWM_Start(&vga_hsync_timer, TIM_CHANNEL_3));
   // And finally start the channel with the scanline interrupt, at which point
-  // we can begin generating actual video!
-  check_hal_error(HAL_TIM_OC_Start_IT(&vga_hsync_timer, TIM_CHANNEL_3));
+  // we can begin outputting actual video!
+  check_hal_error(HAL_TIM_OC_Start_IT(&vga_hsync_timer, TIM_CHANNEL_2));
 }
 
 __STATIC_FORCEINLINE void vga_stop_pixel_dma(void) {
@@ -432,9 +432,9 @@ __STATIC_FORCEINLINE void vga_on_line_end_reached(void) {
 }
 
 void vga_hsync_timer_isr(void) {
-  TIM_TypeDef* timer = TIM3;
-  if (LL_TIM_IsActiveFlag_CC3(timer)) {
-    LL_TIM_ClearFlag_CC3(timer);
+  TIM_TypeDef* timer = TIM2;
+  if (LL_TIM_IsActiveFlag_CC2(timer)) {
+    LL_TIM_ClearFlag_CC2(timer);
     vga_on_line_end_reached();
   }
 }
@@ -449,7 +449,7 @@ void vga_vsync_timer_isr(void) {
 
 void vga_deinit(void) {
   HAL_NVIC_DisableIRQ(TIM1_BRK_TIM9_IRQn);
-  HAL_NVIC_DisableIRQ(TIM3_IRQn);
+  HAL_NVIC_DisableIRQ(TIM2_IRQn);
 
   check_hal_error(HAL_TIM_Base_DeInit(&vga_pixel_timer));
   check_hal_error(HAL_TIM_Base_DeInit(&vga_hsync_timer));
@@ -458,6 +458,6 @@ void vga_deinit(void) {
   check_hal_error(HAL_DMA_DeInit(&vga_pixel_dma));
 
   __HAL_RCC_TIM1_CLK_DISABLE();
-  __HAL_RCC_TIM3_CLK_DISABLE();
+  __HAL_RCC_TIM2_CLK_DISABLE();
   __HAL_RCC_TIM9_CLK_DISABLE();
 }

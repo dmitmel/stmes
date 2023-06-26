@@ -26,10 +26,10 @@ extern "C" {
 #define SDIO_D3_Pin GPIO_PIN_5
 #define SDIO_D3_GPIO_Port GPIOB
 
+#define VGA_HSYNC_GPIO_Port GPIOA
+#define VGA_HSYNC_Pin GPIO_PIN_2
 #define VGA_VSYNC_GPIO_Port GPIOA
 #define VGA_VSYNC_Pin GPIO_PIN_3
-#define VGA_HSYNC_GPIO_Port GPIOA
-#define VGA_HSYNC_Pin GPIO_PIN_7
 #define VGA_PIXEL_GPIO_Port GPIOB
 #define VGA_PIXEL1_Pin GPIO_PIN_0
 #define VGA_PIXEL2_Pin GPIO_PIN_1

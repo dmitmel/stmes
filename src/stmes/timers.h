@@ -6,9 +6,9 @@
 extern "C" {
 #endif
 
-extern TIM_HandleTypeDef htim2;
+extern TIM_HandleTypeDef htim5;
 
-void MX_TIM2_Init(void);
+void MX_TIM5_Init(void);
 
 #ifdef __cplusplus
 }

@@ -35,7 +35,7 @@ void MX_GPIO_Init(void) {
 
   gpio_init = (GPIO_InitTypeDef){
     .Pin =
-      GPIO_PIN_2 | GPIO_PIN_4 | GPIO_PIN_5 | GPIO_PIN_10 | GPIO_PIN_11 | GPIO_PIN_12 | GPIO_PIN_15,
+      GPIO_PIN_4 | GPIO_PIN_5 | GPIO_PIN_7 | GPIO_PIN_10 | GPIO_PIN_11 | GPIO_PIN_12 | GPIO_PIN_15,
     .Mode = GPIO_MODE_ANALOG,
     .Pull = GPIO_NOPULL,
   };
