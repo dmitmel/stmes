@@ -79,6 +79,8 @@ void console_putchar(char c) {
   if (c == '\n') {
     console_new_line();
     self->cursor_col = 0;
+  } else if (c == '\r') {
+    self->cursor_col = 0;
   } else {
     console_set_char(self->cursor_line, self->cursor_col, c);
     self->cursor_col += 1;
@@ -225,8 +227,8 @@ __NO_RETURN void console_main_loop(void) {
       console_render_scanline(vga_line);
     }
 
-    if (vga_registers.next_frame_request) {
-      vga_registers.next_frame_request = false;
+    if (vga_control.next_frame_request) {
+      vga_control.next_frame_request = false;
       static u32 prev_tick;
       u32 tick = HAL_GetTick();
       if (tick >= prev_tick + 200) {

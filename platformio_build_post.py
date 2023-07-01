@@ -8,9 +8,12 @@ projenv.Append(
     "-Werror=return-type",
     "-Wdouble-promotion",
     "-Wmissing-declarations",
+    "-Werror=int-conversion",
   ],
   CFLAGS=[
     "-Werror=implicit-function-declaration",
     "-Werror=strict-prototypes",
+    "-Werror=incompatible-pointer-types",
+    "-Werror=implicit-int",
   ]
 )

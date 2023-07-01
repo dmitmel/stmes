@@ -57,7 +57,7 @@ const struct VgaTimings VGA_TIMINGS_1024x768_60hz = {
   .vert_back_porch = 29,
 };
 
-struct VgaRegisters vga_registers = { 0 };
+struct VgaControlBlock vga_control = { 0 };
 static u32 vga_active_area_packed = 0;
 
 static TIM_HandleTypeDef vga_pixel_timer;
@@ -396,15 +396,15 @@ __STATIC_FORCEINLINE void vga_on_line_end_reached(void) {
   if (current_scanline.repeats > 0) {
     current_scanline.repeats -= 1;
   } else {
-    if (vga_registers.next_scanline_ready) {
-      current_scanline = vga_registers.next_scanline;
-      vga_registers.next_scanline_ready = false;
+    if (vga_control.next_scanline_ready) {
+      current_scanline = vga_control.next_scanline;
+      vga_control.next_scanline_ready = false;
     } else {
       should_render = false;
     }
     // +1 because the zero value is used for specifying that there is no
     // pending request.
-    vga_registers.scanline_request = line_nr - active_start + 1;
+    vga_control.scanline_request = line_nr - active_start + 1;
   }
   if (unlikely(!should_render)) return;
 
@@ -443,7 +443,7 @@ void vga_vsync_timer_isr(void) {
   TIM_TypeDef* timer = TIM9;
   if (LL_TIM_IsActiveFlag_CC1(timer)) {
     LL_TIM_ClearFlag_CC1(timer);
-    vga_registers.next_frame_request = true;
+    vga_control.next_frame_request = true;
   }
 }
 

@@ -31,19 +31,17 @@ struct __ALIGNED(4) VgaScanline {
   u32* buffer;
 };
 
-struct VgaRegisters {
+extern struct VgaControlBlock {
   volatile u16 scanline_request;
   volatile bool next_scanline_ready;
   volatile bool next_frame_request;
   volatile struct VgaScanline next_scanline;
-};
-
-extern struct VgaRegisters vga_registers;
+} vga_control;
 
 __STATIC_FORCEINLINE bool vga_take_scanline_request(u16* line_nr) {
-  u16 request = vga_registers.scanline_request;
+  u16 request = vga_control.scanline_request;
   if (request != 0) {
-    vga_registers.scanline_request = 0;
+    vga_control.scanline_request = 0;
     *line_nr = request - 1;
     return true;
   }
@@ -51,8 +49,15 @@ __STATIC_FORCEINLINE bool vga_take_scanline_request(u16* line_nr) {
 }
 
 __STATIC_FORCEINLINE void vga_set_next_scanline(const struct VgaScanline* scanline) {
-  vga_registers.next_scanline = *scanline;
-  vga_registers.next_scanline_ready = true;
+  volatile struct VgaScanline* next = &vga_control.next_scanline;
+  // Copying these field-by-field generates better assembly than assigning an
+  // entire struct.
+  next->offset = scanline->offset;
+  next->length = scanline->length;
+  next->repeats = scanline->repeats;
+  next->pixel_scale = scanline->pixel_scale;
+  next->buffer = scanline->buffer;
+  vga_control.next_scanline_ready = true;
 }
 
 void vga_init(void);

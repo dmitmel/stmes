@@ -4,6 +4,7 @@
 #include "stmes/gpio.h"
 #include "stmes/kernel/crash.h"
 #include "stmes/kernel/mpu.h"
+#include "stmes/kernel/task.h"
 #include "stmes/sdio.h"
 #include "stmes/timers.h"
 #include "stmes/utils.h"
@@ -39,6 +40,32 @@ static u8* buffered_read(struct BufferedReader* self, FIL* file, FSIZE_t pos, FS
   return &self->buffer[pos - self->offset_start];
 }
 
+static void app_main(void);
+static void* main_task_fn(void*);
+static void* test_task_fn(void*);
+
+static u8 main_task_stack[512] __ALIGNED(8);
+static struct Task main_task = {
+  .stack_start = main_task_stack,
+  .stack_size = sizeof(main_task_stack),
+  .func = &main_task_fn,
+};
+
+static u8 test_task_stack[1024] __ALIGNED(8);
+static struct Task test_task = {
+  .stack_start = test_task_stack,
+  .stack_size = sizeof(test_task_stack),
+  .func = &test_task_fn,
+};
+
+static struct Task* simple_task_scheduler(struct Task* prev_task) {
+  struct Task* next_task = prev_task->next;
+  while (next_task->dead) {
+    next_task = next_task->next;
+  }
+  return next_task;
+}
+
 int main(void) {
   crash_init_hard_faults();
   mpu_init();
@@ -71,6 +98,91 @@ int main(void) {
   vga_apply_timings(&VGA_TIMINGS_640x480_57hz);
   vga_start();
 
+  // Wait a bit for the display to initialize
+  HAL_Delay(1500);
+
+  task_init(&main_task);
+  task_init(&test_task);
+
+  main_task.next = &test_task;
+  test_task.next = &main_task;
+  task_scheduler = &simple_task_scheduler;
+
+  static struct Task fake_task;
+  fake_task.next = &main_task;
+  current_task = &fake_task;
+  task_yield();
+
+  app_main();
+}
+
+static void* test_task_fn(void* user_data) {
+  HAL_StatusTypeDef hal_status;
+  while ((hal_status = BSP_SD_Init()) != HAL_OK) {
+    printf(".");
+    task_sleep(1000);
+  }
+
+  console_clear_screen();
+
+  static FATFS SDFatFS;
+  static FIL SDFile;
+  check_fs_error(f_mount(&SDFatFS, "", 1));
+  check_fs_error(f_open(&SDFile, "bebop_palette.bin", FA_READ));
+  FSIZE_t video_file_len = f_size(&SDFile);
+
+  printf("loading %lu\n", video_file_len);
+  task_yield();
+
+  usize total_bytes = 0;
+  usize buf_size = BLOCKSIZE * 16;
+  char* buf = malloc(buf_size);
+  u32 start_time = HAL_GetTick();
+  u32 start_cycles = DWT->CYCCNT;
+
+  while (true) {
+    console_clear_cursor_line();
+    printf("\r%lu%% %" PRIu32, f_tell(&SDFile) * 100 / video_file_len, HAL_GetTick() - start_time);
+    task_yield();
+    usize bytes_read = 0;
+    if (f_read(&SDFile, buf, buf_size, &bytes_read) != FR_OK) {
+      break;
+    }
+    if (bytes_read == 0) {
+      break;
+    }
+    total_bytes += bytes_read;
+  }
+
+  u32 end_cycles = DWT->CYCCNT;
+  free(buf);
+  printf("\n");
+
+  float elapsed_seconds = (float)(end_cycles - start_cycles) / SystemCoreClock;
+  printf("%" PRIuPTR " %" PRIu32 "\n", total_bytes, end_cycles - start_cycles);
+  printf("%f B/sec\n", total_bytes / elapsed_seconds);
+  printf("%f kB/sec\n", (total_bytes / 1024.0f) / elapsed_seconds);
+  printf("%f MB/sec\n", (total_bytes / 1024.0f / 1024.0f) / elapsed_seconds);
+
+  return user_data;
+}
+
+static void* main_task_fn(void* user_data) {
+  while (true) {
+    __WAIT_FOR_INTERRUPT();
+    u16 vga_line = 0;
+    if (vga_take_scanline_request(&vga_line)) {
+      console_render_scanline(vga_line);
+    }
+    if (vga_control.next_frame_request) {
+      vga_control.next_frame_request = false;
+      task_yield();
+    }
+  }
+  return user_data;
+}
+
+static void app_main(void) {
   HAL_StatusTypeDef hal_status;
   while ((hal_status = BSP_SD_Init()) != HAL_OK) {
     HAL_Delay(200);
@@ -112,8 +224,8 @@ int main(void) {
     if (vga_take_scanline_request(&vga_line)) {
       console_render_scanline(vga_line);
     }
-    if (vga_registers.next_frame_request) {
-      vga_registers.next_frame_request = false;
+    if (vga_control.next_frame_request) {
+      vga_control.next_frame_request = false;
       static u32 prev_tick;
       u32 tick = HAL_GetTick();
       if (tick >= prev_tick + 500) {
@@ -152,7 +264,8 @@ int main(void) {
     u32 deltas_len;
     u32 pixels_len;
   } video_header = { 0 };
-  check_fs_error(f_read(&SDFile, &video_header, sizeof(video_header), NULL));
+  UINT bytes_read = 0;
+  check_fs_error(f_read(&SDFile, &video_header, sizeof(video_header), &bytes_read));
   u16 video_width = video_header.width;
   u16 video_height = video_header.height;
   u32 frames_len = video_header.frames_len;
@@ -185,15 +298,12 @@ int main(void) {
   usize frame_nr = 0, frame_counter = 0;
   u32 next_row_offset = 0, prev_row_offset = 0, frame_deltas_offset = 0;
 
-  // Wait a bit for the display to initialize
-  HAL_Delay(500);
-
   u32 video_palette[8];
 
   while (true) {
     bool load_next_frame = false;
-    if (unlikely(vga_registers.next_frame_request)) {
-      vga_registers.next_frame_request = false;
+    if (unlikely(vga_control.next_frame_request)) {
+      vga_control.next_frame_request = false;
       frame_counter++;
       if (frame_counter % 2 == 0) {
         load_next_frame = true;
