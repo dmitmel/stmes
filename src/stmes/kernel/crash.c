@@ -684,6 +684,10 @@ __NO_RETURN void enter_crash_screen(void) {
     if (vga_take_scanline_request(&vga_line)) {
       console_render_scanline(vga_line);
     }
+    if (vga_control.entering_vblank) {
+      vga_control.entering_vblank = false;
+      console_setup_frame_config();
+    }
     u32 tick = HAL_GetTick();
     if (tick - prev_tick >= BLINK_DELAY) {
       prev_tick = tick;

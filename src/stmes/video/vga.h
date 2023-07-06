@@ -22,42 +22,42 @@ extern const struct VgaTimings VGA_TIMINGS_800x600_60hz;
 extern const struct VgaTimings VGA_TIMINGS_1024x768_60hz;
 
 // Ensure the alignment, so that ldmia/stmia instructions can be used for
-// copying these.
-struct __ALIGNED(4) VgaScanline {
-  u16 offset; // TODO
-  u16 length;
-  u16 repeats;
+// copying instances of these.
+struct __ALIGNED(4) VgaFrameConfig {
   u16 pixel_scale; // Starts at 0 for 1x scale (1 is 2x, 2 is 3x etc)
-  u32* buffer;
+  u16 line_repeats;
+  u16 offset_left; // TODO?
+  u16 offset_top;
+  u16 line_length;
+  u16 lines_count;
 };
 
-extern struct VgaControlBlock {
-  volatile u16 scanline_request;
-  volatile bool next_scanline_ready;
-  volatile bool next_frame_request;
-  volatile struct VgaScanline next_scanline;
+extern volatile struct VgaControlBlock {
+  bool entering_frame;
+  bool entering_vblank;
+  bool next_scanline_requested;
+  bool frame_config_ready;
+  u16 next_scanline_nr;
+  const u32* next_scanline;
+  struct VgaFrameConfig frame_config;
 } vga_control;
 
 __STATIC_FORCEINLINE bool vga_take_scanline_request(u16* line_nr) {
-  u16 request = vga_control.scanline_request;
-  if (request != 0) {
-    vga_control.scanline_request = 0;
-    *line_nr = request - 1;
+  if (vga_control.next_scanline_requested) {
+    vga_control.next_scanline_requested = false;
+    *line_nr = vga_control.next_scanline_nr;
     return true;
   }
   return false;
 }
 
-__STATIC_FORCEINLINE void vga_set_next_scanline(const struct VgaScanline* scanline) {
-  volatile struct VgaScanline* next = &vga_control.next_scanline;
-  // Copying these field-by-field generates better assembly than assigning an
-  // entire struct.
-  next->offset = scanline->offset;
-  next->length = scanline->length;
-  next->repeats = scanline->repeats;
-  next->pixel_scale = scanline->pixel_scale;
-  next->buffer = scanline->buffer;
-  vga_control.next_scanline_ready = true;
+__STATIC_FORCEINLINE void vga_set_next_scanline(const u32* scanline) {
+  vga_control.next_scanline = scanline;
+}
+
+__STATIC_FORCEINLINE void vga_set_frame_config(const struct VgaFrameConfig* cfg) {
+  vga_control.frame_config = *cfg;
+  vga_control.frame_config_ready = true;
 }
 
 void vga_init(void);

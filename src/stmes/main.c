@@ -174,8 +174,9 @@ static void* main_task_fn(void* user_data) {
     if (vga_take_scanline_request(&vga_line)) {
       console_render_scanline(vga_line);
     }
-    if (vga_control.next_frame_request) {
-      vga_control.next_frame_request = false;
+    if (vga_control.entering_vblank) {
+      vga_control.entering_vblank = false;
+      console_setup_frame_config();
       task_yield();
     }
   }
@@ -224,8 +225,9 @@ static void app_main(void) {
     if (vga_take_scanline_request(&vga_line)) {
       console_render_scanline(vga_line);
     }
-    if (vga_control.next_frame_request) {
-      vga_control.next_frame_request = false;
+    if (vga_control.entering_vblank) {
+      vga_control.entering_vblank = false;
+      console_setup_frame_config();
       static u32 prev_tick;
       u32 tick = HAL_GetTick();
       if (tick >= prev_tick + 500) {
@@ -240,12 +242,12 @@ static void app_main(void) {
             fno.fattrib & AM_SYS ? "S" : "-",
             fno.fattrib & AM_HID ? "H" : "-",
             fno.fattrib & AM_RDO ? "R" : "-",
-            ((fno.fdate >> 9) & 0x7F) + 1980,
-            (fno.fdate >> 5) & 0x0F,
-            fno.fdate & 0x1F,
-            (fno.ftime >> 11) & 0x1F,
-            (fno.ftime >> 5) & 0x3F,
-            fno.ftime & 0x1F,
+            ((fno.fdate >> 9) & MASK(7)) + 1980,
+            (fno.fdate >> 5) & MASK(4),
+            fno.fdate & MASK(5),
+            (fno.ftime >> 11) & MASK(5),
+            (fno.ftime >> 5) & MASK(6),
+            fno.ftime & MASK(5),
             fno.fsize / 1024,
             fno.fname
           );
@@ -297,17 +299,24 @@ static void app_main(void) {
 
   usize frame_nr = 0, frame_counter = 0;
   u32 next_row_offset = 0, prev_row_offset = 0, frame_deltas_offset = 0;
-
   u32 video_palette[8];
 
   while (true) {
     bool load_next_frame = false;
-    if (unlikely(vga_control.next_frame_request)) {
-      vga_control.next_frame_request = false;
+    if (unlikely(vga_control.entering_vblank)) {
+      vga_control.entering_vblank = false;
       frame_counter++;
       if (frame_counter % 2 == 0) {
         load_next_frame = true;
       }
+
+      struct VgaFrameConfig frame = {
+        .line_length = FRAME_WIDTH,
+        .lines_count = FRAME_HEIGHT * PIXEL_SCALE,
+        .pixel_scale = PIXEL_SCALE - 1,
+        .line_repeats = PIXEL_SCALE - 1,
+      };
+      vga_set_frame_config(&frame);
     }
 
     if (unlikely(load_next_frame)) {
@@ -407,13 +416,7 @@ static void app_main(void) {
     u16 vga_line = 0;
     if (unlikely(vga_take_scanline_request(&vga_line))) {
       struct PixelDmaBuffer* backbuf = swap_pixel_dma_buffers();
-      struct VgaScanline scanline = {
-        .buffer = backbuf->data,
-        .length = FRAME_WIDTH,
-        .pixel_scale = PIXEL_SCALE - 1,
-        .repeats = PIXEL_SCALE - 1,
-      };
-      vga_set_next_scanline(&scanline);
+      vga_set_next_scanline(backbuf->data);
 
       fast_memset_u32(backbuf->data, 0, FRAME_WIDTH - 1);
       backbuf->data[0] = backbuf->data[FRAME_WIDTH - 1] = VGA_PIXEL_ALL_PINS_RESET;
@@ -425,7 +428,7 @@ static void app_main(void) {
         for (u32 i = 0; i < row->len; i++) {
           u8 encoded = row->data[i];
           u32 repeats = (encoded >> 3) + 1;
-          u32 color = video_palette[encoded & 0x7];
+          u32 color = video_palette[encoded & MASK(3)];
           backbuf->data[pixel_idx] = color;
           pixel_idx += repeats;
         }

@@ -1,4 +1,5 @@
 #include "stmes/video/console.h"
+#include "stmes/kernel/crash.h"
 #include "stmes/utils.h"
 #include "stmes/video/console_font.h"
 #include "stmes/video/framebuf.h"
@@ -100,6 +101,16 @@ void console_print(const char* str) {
 static u32 row_timings[FRAME_HEIGHT] = { 0 };
 static usize row_timings_count = 0;
 
+void console_setup_frame_config(void) {
+  struct VgaFrameConfig frame = {
+    .line_length = FRAME_WIDTH,
+    .lines_count = FRAME_HEIGHT * PIXEL_SCALE,
+    .pixel_scale = PIXEL_SCALE - 1,
+    .line_repeats = PIXEL_SCALE - 1,
+  };
+  vga_set_frame_config(&frame);
+}
+
 // GCC_ATTRIBUTE(optimize("-Os"))
 void console_render_scanline(u16 vga_line) {
   u32 start_time = DWT->CYCCNT;
@@ -108,13 +119,7 @@ void console_render_scanline(u16 vga_line) {
   if (y >= CONSOLE_FRAME_HEIGHT) return;
 
   struct PixelDmaBuffer* backbuf = swap_pixel_dma_buffers();
-  struct VgaScanline scanline = {
-    .buffer = backbuf->data,
-    .length = FRAME_WIDTH,
-    .pixel_scale = PIXEL_SCALE - 1,
-    .repeats = PIXEL_SCALE - 1,
-  };
-  vga_set_next_scanline(&scanline);
+  vga_set_next_scanline(backbuf->data);
 
   usize line_nr = y / CONSOLE_LINE_HEIGHT, char_y = y % CONSOLE_LINE_HEIGHT;
   usize x = (FRAME_WIDTH - CONSOLE_FRAME_WIDTH) / 2;
@@ -227,8 +232,9 @@ __NO_RETURN void console_main_loop(void) {
       console_render_scanline(vga_line);
     }
 
-    if (vga_control.next_frame_request) {
-      vga_control.next_frame_request = false;
+    if (vga_control.entering_vblank) {
+      vga_control.entering_vblank = false;
+      console_setup_frame_config();
       static u32 prev_tick;
       u32 tick = HAL_GetTick();
       if (tick >= prev_tick + 200) {

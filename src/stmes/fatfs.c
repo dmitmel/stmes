@@ -8,7 +8,7 @@
 
 #include <diskio.h>
 
-#define SD_TIMEOUT 3 * 1000
+#define SD_TIMEOUT 3000
 #define SD_DEFAULT_BLOCK_SIZE 512
 
 static u8 dma_scratch[BLOCKSIZE] __ALIGNED(4);

@@ -26,6 +26,7 @@ void console_new_line(void);
 void console_putchar(char c);
 void console_print(const char* str);
 void console_init(void);
+void console_setup_frame_config(void);
 void console_render_scanline(u16 vga_line);
 __NO_RETURN void console_main_loop(void);
 

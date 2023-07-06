@@ -125,6 +125,19 @@ void mpu_init(void) {
     .shareable = 1,
   });
 
+  // SRAM1_BB: Normal memory, shareable, write-through cache
+  mpu_setup_region(&(struct MpuRegionConfig){
+    .number = MPU_REGION_SRAM1_BB_NUM,
+    .base_addr = MPU_REGION_SRAM1_BB_BASE,
+    .end_addr = MPU_REGION_SRAM1_BB_END,
+    .executable = 0,
+    .permissions = MPU_REGION_FULL_ACCESS,
+    .type_ext = 0,
+    .cacheable = 1,
+    .bufferable = 0,
+    .shareable = 1,
+  });
+
   // PERIPH: Device memory, shareable
   mpu_setup_region(&(struct MpuRegionConfig){
     .number = MPU_REGION_PERIPH_NUM,

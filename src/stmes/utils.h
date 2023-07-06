@@ -19,8 +19,8 @@ extern "C" {
 #define ceil_div(a, b) ((a) / (b) + ((a) % (b) != 0))
 #define round_div(a, b) ((a) / (b) + ((a) % (b) > (b) / 2))
 
-#define BIT(i) (1ul << (i))
-#define MASK(i) ((1ul << (i)) - 1)
+#define BIT(i) (1 << (i))
+#define MASK(i) ((1 << (i)) - 1)
 
 // clang-format off
 #define BITS4(a,b,c,d) ((a)<<3 | (b)<<2 | (c)<<1 | (d)<<0)

@@ -1,7 +1,6 @@
 #include "stmes/interrupts.h"
 #include "stmes/dma.h"
 #include "stmes/sdio.h"
-#include "stmes/timers.h"
 #include "stmes/video/vga.h"
 #include <stm32f4xx_hal.h>
 
