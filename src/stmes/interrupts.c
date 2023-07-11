@@ -4,15 +4,32 @@
 #include "stmes/video/vga.h"
 #include <stm32f4xx_hal.h>
 
+// A workaround for errata entry 1.2: "VDIV or VSQRT instructions might not
+// complete correctly when very short ISRs are used".
+__STATIC_FORCEINLINE void nop_interrupt(void) {
+  // The errata recommends having no less than 3 instructions (including the
+  // `bx lr`) in every ISR, but let's add more to be sure.
+  __NOP();
+  __NOP();
+  __NOP();
+  __NOP();
+}
+
 __USED void NMI_Handler(void) {
   while (true) {}
 }
 
-__USED void SVC_Handler(void) {}
+__USED void SVC_Handler(void) {
+  nop_interrupt();
+}
 
-__USED void DebugMon_Handler(void) {}
+__USED void DebugMon_Handler(void) {
+  nop_interrupt();
+}
 
-__USED void PendSV_Handler(void) {}
+__USED void PendSV_Handler(void) {
+  nop_interrupt();
+}
 
 __USED void SysTick_Handler(void) {
   HAL_IncTick();
