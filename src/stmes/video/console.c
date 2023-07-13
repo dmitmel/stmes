@@ -128,6 +128,10 @@ void console_render_scanline(u16 vga_line) {
     return;
   }
 
+  fast_memset_u32(backbuf->data, 0, x);
+  u32 last_x = x + CONSOLE_FRAME_WIDTH;
+  fast_memset_u32(backbuf->data + last_x, 0, FRAME_WIDTH - last_x);
+
   // Apply the vertical scroll.
   line_nr = (console_buffer.top_line + line_nr) % CONSOLE_LINES;
 

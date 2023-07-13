@@ -1,3 +1,63 @@
+// On the general design of the VGA driver:
+//
+// First of all, I am assuming you are familiar with how the VGA signal is
+// generally formed and won't be explaining that here. Instead, here are links
+// to the video series titled "The world's worst video card", which are very
+// informative and describe the interface and a hardware implementation (using
+// discrete logic gates) in great detail:
+// <https://www.youtube.com/watch?v=l7rce6IQDWs> - part 1
+// <https://www.youtube.com/watch?v=uqY3FMuMuRo> - part 2
+// <https://www.youtube.com/watch?v=2iURr3NBprc> - part 3
+// <https://www.youtube.com/watch?v=BUTHtNrpwiI> - part 4
+//
+// This link gives some really useful info on the practical implementation of
+// VGA, plus the complete cable pinout: <https://lateblt.tripod.com/bit74.txt>.
+// VGA timings and clock frequencies: <http://tinyvga.com/vga-timing>.
+//
+// Anyway. The main guiding principle here is getting the most out of the
+// features of the board's peripherals to ensure that the video signal timings
+// are matched as precisely as possible. The key to this has been the (ab)use
+// of the hardware timers: the current timer architecture generates the sync
+// pulses completely independently of the CPU, thus the board can keep
+// outputting a blank frame even when the CPU is halted by the debugger (which
+// makes things more convenient because monitors take time to adjust to the
+// selected video mode once the sync signals are started, and I don't have to
+// wait for that when pressing "continue").
+//
+// The DMA controller is used for outputting the pixel data onto the color
+// lines on the GPIO port (feeding the colors to the its BSRR register) - on
+// the F4 series chips it is fast enough to match the VGA pixel clock at
+// reasonable video resolutions, freeing up the CPU to do all the rendering
+// while the DMA is pushing pixels to the monitor in parallel. Since VGA is an
+// analog interface, an external DAC is needed to convert the colors on the
+// pixel lines into varying voltages for the RGB components, a simple R-2R
+// ladder is more than enough for this.
+//
+// All in all, this design, by offloading work to hardware and being
+// implemented in interrupts, requires minimal intervention from the
+// application once all timers are started, demanding only for frame configs
+// and rendered scanlines to be prepared in time, by communicating with the
+// application through the `vga_control` struct. The only thing to watch out
+// for is the pressure on the memory bus during the video output phase: since
+// the STM32F411CE has only a single bank of RAM, it is very easy to cause
+// contention on the bus matrix and starve the pixel DMA while it is running in
+// parallel at really high rates, *which will cause visible artifacts*.
+//
+// The idea of repurposing PWM for sync pulse generation was stolen from this
+// project: <https://github.com/abelykh0/VGA-demo-on-bluepill>. A lot of things
+// were also inspired by insights from this series of posts:
+// <http://cliffle.com/p/m4vga/> - the author uses an STM32F407 controller and
+// manages to do really impressive stuff with it! (highly recommend reading)
+// 1. <http://cliffle.com/blog/introducing-glitch/> - a demo of what the
+//    project can do.
+// 2. <http://cliffle.com/blog/pushing-pixels/> - explains the usage of DMA on
+//    STM32F407 and its different RAM banks.
+// 3. <http://cliffle.com/blog/glitch-in-the-matrix/> - introduces various
+//    hacks to reduce bus matrix contention (NOTE: read this particular article
+//    to understand the issues I am having with the memory bus "pressure").
+// 4. <http://cliffle.com/blog/racing-the-beam/> - describes the challenges of
+//    real-time rasterization and some assembly-level hacks.
+
 #include "stmes/video/vga.h"
 #include "stmes/gpio.h"
 #include "stmes/kernel/crash.h"
@@ -9,6 +69,7 @@
 #include <stm32f4xx_ll_rcc.h>
 #include <stm32f4xx_ll_tim.h>
 
+// <http://tinyvga.com/vga-timing/640x480@60Hz>
 const struct VgaTimings VGA_TIMINGS_640x480_57hz = {
   .pixel_clock_freq = 24000000,
   .active_width = 640,
@@ -21,6 +82,7 @@ const struct VgaTimings VGA_TIMINGS_640x480_57hz = {
   .vert_back_porch = 33,
 };
 
+// <http://tinyvga.com/vga-timing/640x480@60Hz>
 const struct VgaTimings VGA_TIMINGS_640x480_60hz = {
   .pixel_clock_freq = 25175000,
   .active_width = 640,
@@ -33,6 +95,7 @@ const struct VgaTimings VGA_TIMINGS_640x480_60hz = {
   .vert_back_porch = 33,
 };
 
+// <http://tinyvga.com/vga-timing/800x600@60Hz>
 const struct VgaTimings VGA_TIMINGS_800x600_60hz = {
   .pixel_clock_freq = 40000000,
   .active_width = 800,
@@ -45,6 +108,7 @@ const struct VgaTimings VGA_TIMINGS_800x600_60hz = {
   .vert_back_porch = 23,
 };
 
+// <http://tinyvga.com/vga-timing/1024x768@60Hz>
 const struct VgaTimings VGA_TIMINGS_1024x768_60hz = {
   .pixel_clock_freq = 65000000,
   .active_width = 1024,
@@ -67,6 +131,7 @@ volatile struct VgaControlBlock vga_control;
 // of these into a single memory location, improving data locality.
 static struct VgaState {
   bool rendering_current_frame;
+  u16 pixel_timer_prescaler;
   u32 active_area_start, active_area_height;
   u32 frame_first_line, frame_last_line;
   u32 current_scanline_repeats;
@@ -74,9 +139,7 @@ static struct VgaState {
   struct VgaFrameConfig current_frame;
 } vga_state;
 
-static TIM_HandleTypeDef vga_pixel_timer;
-static TIM_HandleTypeDef vga_hsync_timer;
-static TIM_HandleTypeDef vga_vsync_timer;
+static TIM_HandleTypeDef vga_pixel_timer, vga_hsync_timer, vga_vsync_timer;
 static DMA_HandleTypeDef vga_pixel_dma;
 
 void vga_init(void) {
@@ -93,28 +156,61 @@ void vga_init(void) {
   HAL_NVIC_EnableIRQ(TIM2_IRQn);
 
   {
+    // GPIOB is used for the VGA pixel color pins purely because a lot of pins
+    // on this port are unoccupied by the built-in peripherals (which can't be
+    // said about GPIOA).
     LL_GPIO_ResetOutputPin(VGA_PIXEL_GPIO_Port, VGA_PIXEL_ALL_PINS);
     GPIO_InitTypeDef gpio_init = {
       .Pin = VGA_PIXEL_ALL_PINS,
       .Mode = GPIO_MODE_OUTPUT_PP,
       .Pull = GPIO_NOPULL,
-      .Speed = GPIO_SPEED_FREQ_VERY_HIGH,
+      .Speed = GPIO_SPEED_FREQ_VERY_HIGH, // These pins will be switching at MHz frequencies
     };
     HAL_GPIO_Init(VGA_PIXEL_GPIO_Port, &gpio_init);
   }
 
   {
+    // The usage of the GPIO peripheral to output pixel data onto our parallel
+    // color bus mandates the choice of the DMA2 unit and not DMA1, because the
+    // GPIO registers live on the AHB1 and there simply is no interconnect in
+    // the bus matrix between either port of the DMA1 unit and the peripherals
+    // on AHB (see figure 4 of the STM32F411CE datasheet), only DMA2 can read
+    // from RAM and write to the GPIO output register. This problem is covered
+    // in more detail here: <http://www.efton.sk/STM32/gotcha/g30.html> and
+    // here: <https://stackoverflow.com/questions/46613053/pwm-dma-to-a-whole-gpio/46619315>.
     DMA_HandleTypeDef* hdma = &vga_pixel_dma;
     hdma->Instance = DMA2_Stream5;
+    // TODO: Dynamically adjust the DMA settings to accommodate higher resolutions.
     hdma->Init = (DMA_InitTypeDef){
+      // Corresponds to the TIM1_UP event, for the list of all DMA streams and
+      // channels see table 28 "DMA2 request mapping" of RM0383.
       .Channel = DMA_CHANNEL_6,
-      .Direction = DMA_PERIPH_TO_MEMORY,
-      .PeriphInc = DMA_PINC_ENABLE,
-      .MemInc = DMA_MINC_DISABLE,
+      // Since all peripherals are memory-mapped and both (memory and
+      // peripheral) ports of the DMA2 have more or less full access to the bus
+      // matrix, functionally there is no distinction between reading/writing
+      // from/to an address in SRAM or an address in the peripheral range,
+      // though in practice the DMA controller can prefetch and buffer data
+      // into the FIFO when reading from the memory port. This process helps in
+      // the presence of contention with the CPU on the bus matrix, however it
+      // isn't zero-cost - this gives a very stable video signal, but the
+      // stream can't go faster than HCLK/6. Increasing the speed to get to
+      // higher resolutions is achievable by "flipping" the direction of the
+      // stream to peripheral-to-memory, where the scanline buffer is read from
+      // the peripheral port and the writes to the GPIO register occur on the
+      // memory port - this schizo-optimization can reliably get us up to
+      // HCLK/4 (note that in that case all settings and registers relating to
+      // either port need to be swapped with each other).
+      .Direction = DMA_MEMORY_TO_PERIPH,
+      .PeriphInc = DMA_PINC_DISABLE,
+      .MemInc = DMA_MINC_ENABLE,
       .PeriphDataAlignment = DMA_PDATAALIGN_WORD,
       .MemDataAlignment = DMA_MDATAALIGN_WORD,
       .Mode = DMA_NORMAL,
       .Priority = DMA_PRIORITY_HIGH,
+      // Having FIFO on is very helpful as explained above. The FIFO settings
+      // can noticeably affect signal stability (especially when the memory bus
+      // is under high load) and the maximum output frequency, but further
+      // experimentation is required here.
       .FIFOMode = DMA_FIFOMODE_ENABLE,
       .FIFOThreshold = DMA_FIFO_THRESHOLD_1QUARTERFULL,
       .MemBurst = DMA_MBURST_SINGLE,
@@ -123,14 +219,29 @@ void vga_init(void) {
     check_hal_error(HAL_DMA_Init(hdma));
   }
 
+  // For timer interconnections see tables 49, 53 and 56 "TIMx internal trigger
+  // connection" in RM0383.
+
+  // TIM1 <- TIM5/TIM2/TIM3/TIM4
+  // TIM2 <- TIM1/----/TIM3/TIM4
+  // TIM3 <- TIM1/TIM2/TIM5/TIM4
+  // TIM4 <- TIM1/TIM2/TIM3/----
+  // TIM5 <- TIM2/TIM3/TIM4/----
+  // TIM9 <- TIM2/TIM3/TIM10/TIM11
+
   {
     TIM_HandleTypeDef* htim = &vga_pixel_timer;
+    // Configuration for the pixel timer, which drives the pixel DMA. TIM1 is
+    // pretty much the only timer that can generate DMA requests for DMA2, so
+    // the choice of the timer was dictated by our pixel DMA unit.
     htim->Instance = TIM1;
     htim->Init = (TIM_Base_InitTypeDef){
       .Prescaler = 0,
       .CounterMode = TIM_COUNTERMODE_UP,
       .Period = 0,
       .ClockDivision = TIM_CLOCKDIVISION_DIV1,
+      // The auto-reload preload is absolutely necessary here for the tricks in
+      // the implementation of the horizontal scanline offset.
       .AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE,
     };
     check_hal_error(HAL_TIM_Base_Init(htim));
@@ -140,9 +251,14 @@ void vga_init(void) {
     };
     check_hal_error(HAL_TIM_ConfigClockSource(htim, &clock_init));
 
+    // The pixel timer is programmed to start ticking once a trigger event
+    // arrives from the hsync timer, at the start of every scanline. This
+    // allows us to VERY accurately meet the timings for scanlines and begin
+    // feeding the pixels of every scanline at the exact same time because the
+    // hardware is made responsible for priming the pixel timer.
     TIM_SlaveConfigTypeDef slave_init = {
       .SlaveMode = TIM_SLAVEMODE_TRIGGER,
-      .InputTrigger = TIM_TS_ITR1,
+      .InputTrigger = TIM_TS_ITR1, // Slave to TIM2
     };
     check_hal_error(HAL_TIM_SlaveConfigSynchro(htim, &slave_init));
 
@@ -156,6 +272,16 @@ void vga_init(void) {
   }
 
   {
+    // The hsync timer counts the pixels in a single scanline and has its
+    // period set to the total duration of a scanline (including the blanking
+    // interval). All other timings in the VGA driver are essentially derived
+    // from this timer. TIM2 has been chosen because both the pixel and the
+    // vsync timers can be connected to it and because one of its channels is
+    // connected to a pin on the GPIO port A (to free up the pins on port B for
+    // the color pins). Previously TIM3 had been used for this, but it didn't
+    // satisfy the 2nd requirement, although its power consumption is lower and
+    // I wouldn't have had to sacrifice one of the two available timers with
+    // 32-bit counters.
     TIM_HandleTypeDef* htim = &vga_hsync_timer;
     htim->Instance = TIM2;
     htim->Init = (TIM_Base_InitTypeDef){
@@ -175,12 +301,16 @@ void vga_init(void) {
     check_hal_error(HAL_TIM_OC_Init(htim));
     check_hal_error(HAL_TIM_PWM_Init(htim));
 
+    // The hsync timer shall generate trigger events every time the counter
+    // matches the value in the output compare register of channel 1, which
+    // happens at the start of active area of every line.
     TIM_MasterConfigTypeDef master_init = {
       .MasterOutputTrigger = TIM_TRGO_OC1,
       .MasterSlaveMode = TIM_MASTERSLAVEMODE_ENABLE,
     };
     check_hal_error(HAL_TIMEx_MasterConfigSynchronization(htim, &master_init));
 
+    // The channel 1 generates output compare events at the start of the line.
     TIM_OC_InitTypeDef channel1_init = {
       .OCMode = TIM_OCMODE_TIMING,
       .Pulse = 0,
@@ -188,8 +318,11 @@ void vga_init(void) {
       .OCFastMode = TIM_OCFAST_DISABLE,
     };
     check_hal_error(HAL_TIM_OC_ConfigChannel(htim, &channel1_init, TIM_CHANNEL_1));
+    // Preloading the register won't hurt I guess...
     __HAL_TIM_ENABLE_OCxPRELOAD(htim, TIM_CHANNEL_1);
 
+    // The channel 2 generates output compare events at the end of every line
+    // and triggers the corresponding interrupt.
     TIM_OC_InitTypeDef channel2_init = {
       .OCMode = TIM_OCMODE_TIMING,
       .Pulse = 0,
@@ -199,6 +332,13 @@ void vga_init(void) {
     check_hal_error(HAL_TIM_OC_ConfigChannel(htim, &channel2_init, TIM_CHANNEL_2));
     __HAL_TIM_ENABLE_OCxPRELOAD(htim, TIM_CHANNEL_2);
 
+    // The horizontal synchronization pulse is generated using the PWM mode of
+    // the channel 3. This little trick lets me completely ignore the concerns
+    // of sync pulses in the rest of the driver. However, due to the simplistic
+    // logic of PWM activation (high if CNT < CCRx, low if CNT >= CCRx) the
+    // timer's phase needs to be shifted so that the counter compare value lies
+    // on the sync pulse start time and the pulse ends at the auto-reload point
+    // (channel 1 is necessary precisely to account for this phase shift).
     TIM_OC_InitTypeDef channel3_init = {
       .OCMode = TIM_OCMODE_PWM1,
       .Pulse = 0,
@@ -206,11 +346,18 @@ void vga_init(void) {
       .OCFastMode = TIM_OCFAST_DISABLE,
     };
     check_hal_error(HAL_TIM_PWM_ConfigChannel(htim, &channel3_init, TIM_CHANNEL_3));
+    // The output compare register is configured by HAL to be preloaded by
+    // default for PWM channels.
 
     GPIO_InitTypeDef gpio_init = {
       .Pin = VGA_HSYNC_Pin,
       .Mode = GPIO_MODE_AF_PP,
       .Pull = GPIO_NOPULL,
+      // Even at the highest resolution video modes supported by VGA this pin
+      // won't be switching at a frequency exceeding 2 MHz, so I think even the
+      // LOW speed is enough. For the electrical characteristics of different
+      // GPIO speed modes consult table 55 "I/O AC characteristics" of the
+      // STM32F411CE datasheet.
       .Speed = GPIO_SPEED_FREQ_LOW,
       .Alternate = GPIO_AF1_TIM2,
     };
@@ -218,6 +365,13 @@ void vga_init(void) {
   }
 
   {
+    // The vsync timer counts the scanlines and its period is set to the total
+    // number of scanlines in a frame, including the vblank interval. It is
+    // clocked by the hsync timer. TIM9 has been chosen for this because of its
+    // low power consumption and because all of its channels are connected to
+    // pins on port A and because it could be connected to the vsync himer. The
+    // fact that it is one of the simpler timers and only has two channels,
+    // however, means that we have to be creative with our usage of those.
     TIM_HandleTypeDef* htim = &vga_vsync_timer;
     htim->Instance = TIM9;
     htim->Init = (TIM_Base_InitTypeDef){
@@ -231,12 +385,17 @@ void vga_init(void) {
     check_hal_error(HAL_TIM_OC_Init(htim));
     check_hal_error(HAL_TIM_PWM_Init(htim));
 
+    // This timer is set to use the trigger input events as its clock source,
+    // which in practice means that its counter is incremented at the start of
+    // each scanline.
     TIM_SlaveConfigTypeDef slave_init = {
       .SlaveMode = TIM_SLAVEMODE_EXTERNAL1,
-      .InputTrigger = TIM_TS_ITR0,
+      .InputTrigger = TIM_TS_ITR0, // Slave to TIM2
     };
     check_hal_error(HAL_TIM_SlaveConfigSynchro(htim, &slave_init));
 
+    // Channel 1 is used for triggering an interrupt at requested vertical
+    // positions, which the driver uses for switching its phases.
     TIM_OC_InitTypeDef channel1_init = {
       .OCMode = TIM_OCMODE_TIMING,
       .Pulse = 0,
@@ -244,7 +403,12 @@ void vga_init(void) {
       .OCFastMode = TIM_OCFAST_DISABLE,
     };
     check_hal_error(HAL_TIM_OC_ConfigChannel(htim, &channel1_init, TIM_CHANNEL_1));
+    // Output compare register preload MUST NOT be enabled here because we will
+    // be changing the CCRx while the timer is ticking.
 
+    // The same PWM trick as described above is used for generating the
+    // vertical synchronization pulses on channel 2. The caveat regarding the
+    // need for phase shift applies here as well.
     TIM_OC_InitTypeDef channel2_init = {
       .OCMode = TIM_OCMODE_PWM1,
       .Pulse = 0,
@@ -257,6 +421,7 @@ void vga_init(void) {
       .Pin = VGA_VSYNC_Pin,
       .Mode = GPIO_MODE_AF_PP,
       .Pull = GPIO_NOPULL,
+      // The duration of the pulse can be expressed at most in kHz frequencies.
       .Speed = GPIO_SPEED_FREQ_LOW,
       .Alternate = GPIO_AF3_TIM9,
     };
@@ -293,6 +458,7 @@ void vga_apply_timings(const struct VgaTimings* ts) {
   u32 apb1_pixel_prescaler = calc_timer_prescaler(apb1_freq, ts->pixel_clock_freq, UINT16_MAX),
       apb2_pixel_prescaler = calc_timer_prescaler(apb2_freq, ts->pixel_clock_freq, UINT16_MAX);
 
+  // Recalculate the timings if we couldn't get an integer frequency divisor.
   if (apb1_freq / apb1_pixel_prescaler != ts->pixel_clock_freq) {
     u32 pixel_clk_freq = apb1_freq / apb1_pixel_prescaler;
     float pixel_freq_ratio = (float)pixel_clk_freq / (float)ts->pixel_clock_freq;
@@ -308,6 +474,8 @@ void vga_apply_timings(const struct VgaTimings* ts) {
 
   vga_state.active_area_start = vert_back_porch;
   vga_state.active_area_height = active_height;
+  vga_state.pixel_timer_prescaler = apb2_pixel_prescaler;
+  vga_state.rendering_current_frame = false;
 
   // TODO: Investigate methods of calculating both the prescaler and the
   // autoreload for clock division (the lower the timer frequency the lower the
@@ -315,8 +483,6 @@ void vga_apply_timings(const struct VgaTimings* ts) {
   LL_TIM_SetPrescaler(pixel_tim, 0);
   // NOTE: When ARR=0 the timer is disabled.
   LL_TIM_SetAutoReload(pixel_tim, apb2_pixel_prescaler - 1);
-
-  // TODO: Investigate if 1 needs to subtracted from CCRx values.
 
   LL_TIM_SetPrescaler(hsync_tim, apb1_pixel_prescaler - 1);
   LL_TIM_SetAutoReload(hsync_tim, whole_line - 1);
@@ -331,12 +497,15 @@ void vga_apply_timings(const struct VgaTimings* ts) {
   LL_TIM_OC_SetCompareCH2(vsync_tim, whole_frame - vsync_width);
   LL_TIM_OC_SetPolarity(vsync_tim, LL_TIM_CHANNEL_CH2, vsync_polarity);
 
-  LL_TIM_EnableIT_CC1(vsync_tim);
+  LL_TIM_ClearFlag_CC1(vsync_tim);
+  LL_TIM_ClearFlag_CC2(hsync_tim);
 
   // Apply the prescaler changes immediately (and reset the counters).
   LL_TIM_GenerateEvent_UPDATE(pixel_tim);
   LL_TIM_GenerateEvent_UPDATE(hsync_tim);
   LL_TIM_GenerateEvent_UPDATE(vsync_tim);
+
+  LL_TIM_EnableIT_CC1(vsync_tim);
 }
 
 void vga_start(void) {
@@ -385,9 +554,9 @@ __STATIC_FORCEINLINE void vga_start_pixel_dma(const u32* buf, u16 len) {
   // Set the number of data
   WRITE_REG(pixel_dma->NDTR, len);
   // Set the peripheral address
-  WRITE_REG(pixel_dma->PAR, (usize)buf);
+  WRITE_REG(pixel_dma->PAR, (usize)&VGA_PIXEL_GPIO_Port->BSRR);
   // Set the memory address
-  WRITE_REG(pixel_dma->M0AR, (usize)&VGA_PIXEL_GPIO_Port->BSRR);
+  WRITE_REG(pixel_dma->M0AR, (usize)buf);
   // Enable the stream
   SET_BIT(pixel_dma->CR, DMA_SxCR_EN);
 }
@@ -402,26 +571,26 @@ __STATIC_FORCEINLINE u32 vga_on_line_start(void) {
   TIM_TypeDef* hsync_tim = TIM2;
   u32 line_nr = LL_TIM_GetCounter(vsync_tim);
 
-  // The rendering mode actually begins two lines before the active area of the
-  // VGA signal: one line is subtracted because the pixel DMA will start only
-  // on the next line anyway since it is reloaded by the end-of-line interrupt,
-  // and we need at least one line time to prepare the pixel data.
+  // The rendering phase actually begins two lines before the active area of
+  // the VGA signal: one line is subtracted because the pixel DMA will start
+  // only on the next line anyway since it is reloaded by the end-of-line
+  // interrupt, and we need at least one line time to prepare the pixel data.
   u32 active_area_entry_line = state->active_area_start - 2;
 
   // The outermost condition checks that we haven't just concluded the
   // rendering of a frame, in which case we skip to the fallback section below.
-  if (!(state->rendering_current_frame && line_nr == state->frame_last_line)) {
+  if (!(state->rendering_current_frame && line_nr == state->frame_last_line + 1)) {
     // Ok, seems that the interrupt has occured somewhere before the frame.
     if (!state->rendering_current_frame) {
       if (line_nr == active_area_entry_line && control->frame_config_ready) {
         // Absorb the frame config if it has been prepared in time for us.
         state->current_frame = control->frame_config;
         control->frame_config_ready = false;
-        u32 active_area_end = state->active_area_start + state->active_area_height;
+        u32 active_area_end = state->active_area_start + state->active_area_height - 1;
         u32 frame_offset = state->current_frame.offset_top;
         u32 frame_height = state->current_frame.lines_count;
         state->frame_first_line = MIN(state->active_area_start + frame_offset, active_area_end);
-        state->frame_last_line = MIN(state->frame_first_line + frame_height, active_area_end);
+        state->frame_last_line = MIN(state->frame_first_line + frame_height - 1, active_area_end);
         // NOTE: frame_last_line and frame_first_line should be considered
         // valid only if rendering_current_frame is set!
         state->rendering_current_frame = true;
@@ -453,10 +622,10 @@ __STATIC_FORCEINLINE u32 vga_on_line_start(void) {
       LL_TIM_ClearFlag_CC2(hsync_tim);
       LL_TIM_EnableIT_CC2(hsync_tim);
       // Finally, notify the rest of the system that we are about to enter the
-      // rendering mode.
+      // rendering phase.
       control->entering_frame = true;
       // And now this interrupt can peacefully sleep until the end of the frame.
-      return state->frame_last_line;
+      return state->frame_last_line + 1;
     }
   }
 
@@ -475,9 +644,7 @@ __STATIC_FORCEINLINE const u32* vga_fetch_next_scanline(u32 next_line_nr) {
   volatile struct VgaControlBlock* control = &vga_control;
 
   // This branch is actually unlikely and will occur only once per frame.
-  if (unlikely(next_line_nr == state->frame_last_line)) {
-    return NULL;
-  }
+  if (unlikely(next_line_nr > state->frame_last_line)) return NULL;
 
   // Well, the case of repeating scanlines is not exactly unlikely (it will
   // occur half the time), I just want to make the other branch (which has much
@@ -494,7 +661,9 @@ __STATIC_FORCEINLINE const u32* vga_fetch_next_scanline(u32 next_line_nr) {
   state->current_scanline_repeats = repeats;
 
   // Plus one because the repeats value starts at zero.
-  control->next_scanline_nr = next_line_nr - state->frame_first_line + (repeats + 1);
+  u32 requested_line_nr = next_line_nr + (repeats + 1);
+  if (unlikely(requested_line_nr > state->frame_last_line)) return scanline;
+  control->next_scanline_nr = requested_line_nr - state->frame_first_line;
   control->next_scanline_requested = true;
   return scanline;
 }
@@ -503,32 +672,52 @@ __STATIC_FORCEINLINE const u32* vga_fetch_next_scanline(u32 next_line_nr) {
 __STATIC_FORCEINLINE void vga_on_line_end_reached(void) {
   struct VgaState* state = &vga_state;
   TIM_TypeDef* pixel_tim = TIM1;
-  LL_TIM_DisableCounter(pixel_tim); // Halt the pixel timer, and thus the DMA
+  // Halt the pixel timer, and thus the DMA.
+  LL_TIM_DisableCounter(pixel_tim);
+  // Reset all color pins, there must be no output in the blanking interval.
   LL_GPIO_ResetOutputPin(VGA_PIXEL_GPIO_Port, VGA_PIXEL_ALL_PINS);
   vga_stop_pixel_dma();
+  // Reset the color pins again if something has been flushed out of the FIFO.
   LL_GPIO_ResetOutputPin(VGA_PIXEL_GPIO_Port, VGA_PIXEL_ALL_PINS);
 
   TIM_TypeDef* vsync_tim = TIM9;
   u32 next_line_nr = LL_TIM_GetCounter(vsync_tim) + 1;
 
   const u32* next_scanline = vga_fetch_next_scanline(next_line_nr);
-  if (unlikely(next_scanline == NULL)) {
-    return;
-  }
+  if (unlikely(next_scanline == NULL)) return;
 
-  // Prepare the pixel timer for restart. First, we want to apply the requested
-  // scanline parameters:
-  // TODO: scanline offset can be accomplished by abusing the autoreload
-  // preload setting, which effectively turns the ARR register into a memory
-  // cell for one timer tick.
-  LL_TIM_SetPrescaler(pixel_tim, state->current_frame.pixel_scale);
-  // The prescaler changes are applied only on the following UPDATE event, so
-  // we must generate one ourselves:
-  LL_TIM_GenerateEvent_UPDATE(pixel_tim);
-  // Forcing an UPDATE event won't start the counter, though it will reset it.
-  // However, we want the pixel DMA to be started without any delay, so we set
-  // the counter to a value that will cause a reload immediately upon restart.
-  LL_TIM_SetCounter(pixel_tim, LL_TIM_GetAutoReload(pixel_tim));
+  // Prepare the apply the requested scanline parameters and prepare the pixel
+  // timer for restart.
+  u32 pixel_period = state->pixel_timer_prescaler * (state->current_frame.pixel_scale + 1);
+  u32 left_offset = state->current_frame.offset_left;
+  if (likely(left_offset == 0)) {
+    // Instead of changing the prescaler (which apparently makes the timer less
+    // precise) we change the period.
+    LL_TIM_SetAutoReload(pixel_tim, pixel_period - 1);
+    // The prescaler and auto-reload (when it is preloaded) changes are applied
+    // only on the following UPDATE event, so we must generate one ourselves:
+    LL_TIM_GenerateEvent_UPDATE(pixel_tim);
+    // Forcing an UPDATE event won't start the counter, though that will reset
+    // it. However, we want the pixel DMA to be started without any delay, so
+    // set the counter to a value that will immediately cause a reload.
+    LL_TIM_SetCounter(pixel_tim, pixel_period - 1);
+  } else {
+    // HACK: Shifting the scanlines by a horizontal offset is accomplished by
+    // exploiting the auto-reload preload setting, which effectively turns the
+    // ARR register into a memory cell for the duration of one timer tick.
+    LL_TIM_SetAutoReload(pixel_tim, state->pixel_timer_prescaler * left_offset - 1);
+    // Force an UPDATE event to place the wait period into the ARR register.
+    // The fact that it also resets the counter is beneficial this time.
+    LL_TIM_GenerateEvent_UPDATE(pixel_tim);
+    // Unsure why, but a short delay is necessary here, otherwise the timer
+    // peripheral won't observe the fake auto-reload value set above.
+    __NOP();
+    // And finally, write the real timer activation period. It won't be applied
+    // yet, the first pixel will be outputted only after waiting for the offset
+    // period at the start of the next line, but all following pixels will use
+    // this auto-reload value.
+    LL_TIM_SetAutoReload(pixel_tim, pixel_period - 1);
+  }
 
   // Clear any leftover DMA requests from the timer...
   LL_TIM_DisableDMAReq_UPDATE(pixel_tim);

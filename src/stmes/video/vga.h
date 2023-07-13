@@ -26,7 +26,7 @@ extern const struct VgaTimings VGA_TIMINGS_1024x768_60hz;
 struct __ALIGNED(4) VgaFrameConfig {
   u16 pixel_scale; // Starts at 0 for 1x scale (1 is 2x, 2 is 3x etc)
   u16 line_repeats;
-  u16 offset_left; // TODO?
+  u16 offset_left;
   u16 offset_top;
   u16 line_length;
   u16 lines_count;
