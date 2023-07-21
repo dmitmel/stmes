@@ -1,5 +1,4 @@
 #include "stmes/video/console.h"
-#include "stmes/kernel/crash.h"
 #include "stmes/utils.h"
 #include "stmes/video/console_font.h"
 #include "stmes/video/framebuf.h"
@@ -174,10 +173,12 @@ void console_render_scanline(u16 vga_line) {
 
     // It's a shame that there is no "parallel load" instruction, so now we
     // have to unpack the u32 with the character values to load the font bytes.
-    u8 font_byte1 = font_row_data[chars & 0xFF];
-    u8 font_byte2 = font_row_data[(chars >> 8) & 0xFF];
-    u8 font_byte3 = font_row_data[(chars >> 16) & 0xFF];
-    u8 font_byte4 = font_row_data[(chars >> 24) & 0xFF];
+    usize char_idx1 = (chars >> 0) & 0xFF, char_idx2 = (chars >> 8) & 0xFF;
+    usize char_idx3 = (chars >> 16) & 0xFF, char_idx4 = (chars >> 24) & 0xFF;
+    // Compute the indexes before performing the loads so that the two lines
+    // below compile to consecutive `ldrb` instructions, which may be pipelined.
+    u8 font_byte1 = font_row_data[char_idx1], font_byte2 = font_row_data[char_idx2];
+    u8 font_byte3 = font_row_data[char_idx3], font_byte4 = font_row_data[char_idx4];
 
     // Afterwards we (again) pack all font bytes in a single contiguous u32 to
     // be able to process all pixel data in a single loop below.
@@ -186,9 +187,11 @@ void console_render_scanline(u16 vga_line) {
     // Aaaaaand finally we can output some pixels!
     for (u32* end = pixel_ptr + CONSOLE_FONT_WIDTH * actually_fetched_chars; pixel_ptr != end;
          font_bytes >>= 8, char_attrs >>= 8) {
+      // Same story with the indexes and loads as above.
+      usize fg_idx = char_attrs & 0xF, bg_idx = (char_attrs >> 4) & 0xF;
       // The RAM cache does a pretty good job at keeping these around for
       // strides of characters with the same colors.
-      u32 fg = console_palette[char_attrs & 0xF], bg = console_palette[(char_attrs >> 4) & 0xF];
+      u32 fg = console_palette[fg_idx], bg = console_palette[bg_idx];
       if ((font_bytes & 0xFF) != 0) {
         usize i = 0, mask = 0x80;
         // I'm using the poor man's loop unroller here (the macro simply
@@ -200,7 +203,15 @@ void console_render_scanline(u16 vga_line) {
           // it here - just dumb copying and assigning every pixel is twice as
           // fast than anything I could come up with for detecting and skipping
           // the unchanged pixel values.
-          if (i++ < CONSOLE_FONT_WIDTH) *pixel_ptr++ = (font_bytes & mask) != 0 ? fg : bg;
+          if (i++ < CONSOLE_FONT_WIDTH) {
+            // This should more or less compile to blocks of `tst`, `it` and
+            // two `str` instructions with `eq` and `ne` condition codes.
+            if ((font_bytes & mask) != 0) {
+              *pixel_ptr++ = fg;
+            } else {
+              *pixel_ptr++ = bg;
+            }
+          }
           mask >>= 1;
         });
       } else {
