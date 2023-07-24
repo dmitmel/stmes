@@ -128,7 +128,7 @@ void console_render_scanline(u16 vga_line) {
   }
 
   fast_memset_u32(backbuf->data, 0, x);
-  u32 last_x = x + CONSOLE_FRAME_WIDTH;
+  usize last_x = x + CONSOLE_FRAME_WIDTH;
   fast_memset_u32(backbuf->data + last_x, 0, FRAME_WIDTH - last_x);
 
   // Apply the vertical scroll.
@@ -188,12 +188,12 @@ void console_render_scanline(u16 vga_line) {
     for (u32* end = pixel_ptr + CONSOLE_FONT_WIDTH * actually_fetched_chars; pixel_ptr != end;
          font_bytes >>= 8, char_attrs >>= 8) {
       // Same story with the indexes and loads as above.
-      usize fg_idx = char_attrs & 0xF, bg_idx = (char_attrs >> 4) & 0xF;
+      usize fg_idx = char_attrs & MASK(4), bg_idx = (char_attrs >> 4) & MASK(4);
       // The RAM cache does a pretty good job at keeping these around for
       // strides of characters with the same colors.
       u32 fg = console_palette[fg_idx], bg = console_palette[bg_idx];
       if ((font_bytes & 0xFF) != 0) {
-        usize i = 0, mask = 0x80;
+        usize i = 0;
         // I'm using the poor man's loop unroller here (the macro simply
         // copy-pastes its argument N times), however, the compiler seems to do
         // a really good job at translating this, expanding the loop variables
@@ -204,15 +204,17 @@ void console_render_scanline(u16 vga_line) {
           // fast than anything I could come up with for detecting and skipping
           // the unchanged pixel values.
           if (i++ < CONSOLE_FONT_WIDTH) {
-            // This should more or less compile to blocks of `tst`, `it` and
-            // two `str` instructions with `eq` and `ne` condition codes.
-            if ((font_bytes & mask) != 0) {
-              *pixel_ptr++ = fg;
-            } else {
-              *pixel_ptr++ = bg;
-            }
+            // This should more or less compile to 3 instructions per pixel:
+            //
+            // sub fg_bg, fg, bg
+            // ...
+            // ubfx bit, font_bytes, #<i>, #1
+            // mla color, bit, fg_bg, bg
+            // str color, [pixel_ptr], #4
+            // ...
+            u32 bit = (font_bytes >> (8 - i)) & 1;
+            *pixel_ptr++ = (fg - bg) * bit + bg;
           }
-          mask >>= 1;
         });
       } else {
         usize i = 0;
