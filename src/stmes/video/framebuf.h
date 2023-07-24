@@ -1,6 +1,7 @@
 #pragma once
 
 #include "stmes/utils.h"
+#include "stmes/video/vga.h"
 #include <stm32f4xx_hal.h>
 
 #ifdef __cplusplus
@@ -13,14 +14,14 @@ extern "C" {
 #define COLOR_BIT_DEPTH 12
 
 struct PixelDmaBuffer {
-  u32 data[FRAME_WIDTH];
+  VgaPixel data[FRAME_WIDTH] __ALIGNED(4);
   u32 non_zeroes[FRAME_WIDTH / 32];
   volatile u32* non_zeroes_bitband;
 };
 
 struct PixelDmaBuffer* swap_pixel_dma_buffers(void);
 
-__STATIC_INLINE void pixel_dma_buf_set(struct PixelDmaBuffer* buf, u16 index, u32 value) {
+__STATIC_INLINE void pixel_dma_buf_set(struct PixelDmaBuffer* buf, u16 index, VgaPixel value) {
   buf->data[index] = value;
   buf->non_zeroes_bitband[index] = 1;
 }

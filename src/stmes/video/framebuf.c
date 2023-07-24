@@ -12,7 +12,7 @@ struct PixelDmaBuffer* swap_pixel_dma_buffers(void) {
 
 // GCC_ATTRIBUTE(optimize("-Os"))
 void pixel_dma_buf_reset(struct PixelDmaBuffer* buf) {
-  u32* pixel_ptr = buf->data;
+  VgaPixel* pixel_ptr = buf->data;
   for (usize i = 0; i < SIZEOF(buf->non_zeroes); i++) {
     u32 non_zeroes = buf->non_zeroes[i];
     buf->non_zeroes[i] = 0;
@@ -23,9 +23,10 @@ void pixel_dma_buf_reset(struct PixelDmaBuffer* buf) {
     pixel_ptr += 30;
     while (non_zeroes != 0) {
       u32 offset = __CLZ(non_zeroes);
+      STATIC_ASSERT(sizeof(*pixel_ptr) == sizeof(u32));
       *(u64*)(pixel_ptr - offset) = 0;
-      non_zeroes &= ~((1 << 31) | (1 << 30)) >> offset;
-      // non_zeroes ^= (1 << 31) >> offset;
+      non_zeroes &= ~(BIT(31) | BIT(30)) >> offset;
+      // non_zeroes ^= BIT(31) >> offset;
     }
     pixel_ptr += 2;
   }

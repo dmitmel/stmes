@@ -61,8 +61,10 @@ typedef float f32;
 typedef double f64;
 
 void fast_memset_u8(u8* dst, u8 val, usize n);
+void fast_memset_u16(u16* dst, u16 val, usize n);
 void fast_memset_u32(u32* dst, u32 val, usize n);
 void fast_memcpy_u8(u8* dst, const u8* src, usize n);
+void fast_memcpy_u16(u16* dst, const u16* src, usize n);
 void fast_memcpy_u32(u32* dst, const u32* src, usize n);
 
 // <https://stackoverflow.com/q/19965076/12005228>

@@ -23,7 +23,7 @@ static struct ConsoleBuffer {
 } console_buffer = { 0 };
 
 // These colors are converted into pixel pin values below.
-static u32 console_palette[16] = {
+static VgaPixel console_palette[16] = {
   0x000, 0xF00, 0x0F0, 0xFF0, 0x00F, 0xF0F, 0x0FF, 0xFFF,
   0x444, 0x800, 0x080, 0x880, 0x008, 0x808, 0x088, 0x888,
 };
@@ -123,20 +123,20 @@ void console_render_scanline(u16 vga_line) {
   usize line_nr = y / CONSOLE_LINE_HEIGHT, char_y = y % CONSOLE_LINE_HEIGHT;
   usize x = (FRAME_WIDTH - CONSOLE_FRAME_WIDTH) / 2;
   if (char_y >= CONSOLE_FONT_HEIGHT) {
-    fast_memset_u32(backbuf->data, 0, FRAME_WIDTH);
+    vga_fast_memset(backbuf->data, 0, FRAME_WIDTH);
     return;
   }
 
-  fast_memset_u32(backbuf->data, 0, x);
+  vga_fast_memset(backbuf->data, 0, x);
   usize last_x = x + CONSOLE_FRAME_WIDTH;
-  fast_memset_u32(backbuf->data + last_x, 0, FRAME_WIDTH - last_x);
+  vga_fast_memset(backbuf->data + last_x, 0, FRAME_WIDTH - last_x);
 
   // Apply the vertical scroll.
   line_nr = (console_buffer.top_line + line_nr) % CONSOLE_LINES;
 
   // NOTE: The timing is CRITICAL in the code below!!!
 
-  u32* pixel_ptr = backbuf->data + x;
+  VgaPixel* pixel_ptr = backbuf->data + x;
   const u32* text = console_buffer.text[line_nr];
   const u32* attrs = console_buffer.text_attrs[line_nr];
   // The font is stored in a row-major order (i.e. first comes the block for
@@ -185,7 +185,7 @@ void console_render_scanline(u16 vga_line) {
     u32 font_bytes = font_byte1 | (font_byte2 << 8) | (font_byte3 << 16) | (font_byte4 << 24);
 
     // Aaaaaand finally we can output some pixels!
-    for (u32* end = pixel_ptr + CONSOLE_FONT_WIDTH * actually_fetched_chars; pixel_ptr != end;
+    for (VgaPixel* end = pixel_ptr + CONSOLE_FONT_WIDTH * actually_fetched_chars; pixel_ptr != end;
          font_bytes >>= 8, char_attrs >>= 8) {
       // Same story with the indexes and loads as above.
       usize fg_idx = char_attrs & MASK(4), bg_idx = (char_attrs >> 4) & MASK(4);

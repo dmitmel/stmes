@@ -135,7 +135,7 @@ static struct VgaState {
   u32 active_area_start, active_area_height;
   u32 frame_first_line, frame_last_line;
   u32 current_scanline_repeats;
-  const u32* current_scanline;
+  const VgaPixel* current_scanline;
   struct VgaFrameConfig current_frame;
 } vga_state;
 
@@ -549,7 +549,7 @@ __STATIC_FORCEINLINE void vga_stop_pixel_dma(void) {
   );
 }
 
-__STATIC_FORCEINLINE void vga_start_pixel_dma(const u32* buf, u16 len) {
+__STATIC_FORCEINLINE void vga_start_pixel_dma(const VgaPixel* buf, u16 len) {
   DMA_Stream_TypeDef* pixel_dma = DMA2_Stream5;
   // Set the number of data
   WRITE_REG(pixel_dma->NDTR, len);
@@ -639,7 +639,7 @@ __STATIC_FORCEINLINE u32 vga_on_line_start(void) {
   return active_area_entry_line;
 }
 
-__STATIC_FORCEINLINE const u32* vga_fetch_next_scanline(u32 next_line_nr) {
+__STATIC_FORCEINLINE const VgaPixel* vga_fetch_next_scanline(u32 next_line_nr) {
   struct VgaState* state = &vga_state;
   volatile struct VgaControlBlock* control = &vga_control;
 
@@ -654,7 +654,7 @@ __STATIC_FORCEINLINE const u32* vga_fetch_next_scanline(u32 next_line_nr) {
     return state->current_scanline;
   }
 
-  const u32* scanline = control->next_scanline;
+  const VgaPixel* scanline = control->next_scanline;
   control->next_scanline = NULL;
   state->current_scanline = scanline;
   u32 repeats = state->current_frame.line_repeats;
@@ -683,7 +683,7 @@ __STATIC_FORCEINLINE void vga_on_line_end_reached(void) {
   TIM_TypeDef* vsync_tim = TIM9;
   u32 next_line_nr = LL_TIM_GetCounter(vsync_tim) + 1;
 
-  const u32* next_scanline = vga_fetch_next_scanline(next_line_nr);
+  const VgaPixel* next_scanline = vga_fetch_next_scanline(next_line_nr);
   if (unlikely(next_scanline == NULL)) return;
 
   // Prepare the apply the requested scanline parameters and prepare the pixel

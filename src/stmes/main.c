@@ -430,7 +430,7 @@ static __NO_RETURN void video_player_demo(void) {
       struct PixelDmaBuffer* backbuf = swap_pixel_dma_buffers();
       vga_set_next_scanline(backbuf->data);
 
-      fast_memset_u32(backbuf->data, 0, FRAME_WIDTH - 1);
+      vga_fast_memset(backbuf->data, 0, FRAME_WIDTH - 1);
       backbuf->data[0] = backbuf->data[FRAME_WIDTH - 1] = VGA_PIXEL_ALL_PINS_RESET;
 
       u32 video_y = vga_line / PIXEL_SCALE - (FRAME_HEIGHT - video_height) / 2;
@@ -524,7 +524,7 @@ static __NO_RETURN void image_viewer_demo(void) {
       if (video_y < image_height) {
         usize pixel_idx = (FRAME_WIDTH - image_width) / 2;
         u8* row = &image_pixels[video_y * image_width];
-        u32* pixel_ptr = &backbuf->data[pixel_idx];
+        VgaPixel* pixel_ptr = &backbuf->data[pixel_idx];
         for (u8* row_end = row + image_width; row != row_end; row += 8, pixel_ptr += 8) {
           u32 quad1 = ((u32*)row)[0], quad2 = ((u32*)row)[1];
           u32 byte1, byte2, byte3, byte4, byte5, byte6, byte7, byte8;

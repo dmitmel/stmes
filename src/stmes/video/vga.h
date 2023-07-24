@@ -21,6 +21,10 @@ extern const struct VgaTimings VGA_TIMINGS_640x480_60hz;
 extern const struct VgaTimings VGA_TIMINGS_800x600_60hz;
 extern const struct VgaTimings VGA_TIMINGS_1024x768_60hz;
 
+typedef u32 VgaPixel;
+#define vga_fast_memset fast_memset_u32
+#define vga_fast_memcpy fast_memcpy_u32
+
 // Ensure the alignment, so that ldmia/stmia instructions can be used for
 // copying instances of these.
 struct __ALIGNED(4) VgaFrameConfig {
@@ -38,7 +42,7 @@ extern volatile struct VgaControlBlock {
   bool next_scanline_requested;
   bool frame_config_ready;
   u16 next_scanline_nr;
-  const u32* next_scanline;
+  const VgaPixel* next_scanline;
   struct VgaFrameConfig frame_config;
 } vga_control;
 
@@ -51,7 +55,7 @@ __STATIC_FORCEINLINE bool vga_take_scanline_request(u16* line_nr) {
   return false;
 }
 
-__STATIC_FORCEINLINE void vga_set_next_scanline(const u32* scanline) {
+__STATIC_FORCEINLINE void vga_set_next_scanline(const VgaPixel* scanline) {
   vga_control.next_scanline = scanline;
 }
 
@@ -74,12 +78,12 @@ void vga_deinit(void);
 // Instead, this function establishes a mapping between the RGB colors and the
 // pins corresponding to every single bit of the color, and returns a value
 // suitable for writing to the BSRR register.
-__STATIC_FORCEINLINE u32 rgb12_to_vga_pins(u32 color) {
+__STATIC_FORCEINLINE VgaPixel rgb12_to_vga_pins(VgaPixel color) {
   // Unfortunately I couldn't find a way to get the compiler to figure out the
   // bit airthmetic for me, so the masks and shifts in this function must be
   // recalculated in case the VGA pixel pins are changed.
   STATIC_ASSERT(VGA_PIXEL_ALL_PINS == 0x77CF);
-  u32 pins = 0;
+  VgaPixel pins = 0;
   pins |= (color & 0x00F) << 0; // color[ 3:0] -> pins[ 3:0 ]
   pins |= (color & 0x1F0) << 2; // color[ 8:4] -> pins[10:6 ]
   pins |= (color & 0xE00) << 3; // color[11:9] -> pins[14:12]
