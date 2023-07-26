@@ -11,11 +11,11 @@
 static struct ConsoleBuffer {
   // The 8-bit characters and attributes are stored in 32-bit bundles to allow
   // fetching 4 items with one aligned 32-bit load.
-  u32 text[CONSOLE_LINES][(CONSOLE_COLUMNS + 3) / 4];
+  char text[CONSOLE_LINES][(CONSOLE_COLUMNS + 3) / 4 * 4] __ALIGNED(4);
   // Same goes for text attributes. The attributes themselves are encoded as
   // follows: the 4 low bits are for the foregound color, the high 4 are for
   // the background.
-  u32 text_attrs[CONSOLE_LINES][(CONSOLE_COLUMNS + 3) / 4];
+  u8 text_attrs[CONSOLE_LINES][(CONSOLE_COLUMNS + 3) / 4 * 4] __ALIGNED(4);
   // Also, the text lines array actually forms a ring buffer to enable quick
   // scrolling of the console buffer.
   u8 top_line;
@@ -38,17 +38,16 @@ void console_set_color(u8 color) {
 
 void console_set_char(u8 line, u8 col, char c) {
   struct ConsoleBuffer* self = &console_buffer;
-  ((u8*)self->text[line])[col] = c;
-  ((u8*)self->text_attrs[line])[col] = self->current_text_attrs;
+  self->text[line][col] = c;
+  self->text_attrs[line][col] = self->current_text_attrs;
 }
 
 void console_clear_line(u8 line) {
   struct ConsoleBuffer* self = &console_buffer;
+  u8 attr = self->current_text_attrs;
   // Note how we can *assign* four characters at a time as well.
-  fast_memset_u32(self->text[line], ' ' * SMEAR_8x4, SIZEOF(self->text[0]));
-  fast_memset_u32(
-    self->text_attrs[line], self->current_text_attrs * SMEAR_8x4, SIZEOF(self->text_attrs[0])
-  );
+  fast_memset_u32((u32*)self->text[line], ' ' * SMEAR_8x4, SIZEOF(self->text[0]) / 4);
+  fast_memset_u32((u32*)self->text_attrs[line], attr * SMEAR_8x4, SIZEOF(self->text_attrs[0]) / 4);
 }
 
 void console_clear_cursor_line(void) {
@@ -137,8 +136,8 @@ void console_render_scanline(u16 vga_line) {
   // NOTE: The timing is CRITICAL in the code below!!!
 
   VgaPixel* pixel_ptr = backbuf->data + x;
-  const u32* text = console_buffer.text[line_nr];
-  const u32* attrs = console_buffer.text_attrs[line_nr];
+  const u32* text = (const u32*)console_buffer.text[line_nr];
+  const u32* attrs = (const u32*)console_buffer.text_attrs[line_nr];
   // The font is stored in a row-major order (i.e. first comes the block for
   // y=0 row of every character, then the block for the row at y=1 and so on
   // and so on) to improve cache locality because we are going to be accessing
@@ -213,6 +212,8 @@ void console_render_scanline(u16 vga_line) {
             // str color, [pixel_ptr], #4
             // ...
             u32 bit = (font_bytes >> (8 - i)) & 1;
+            // This expression selects between fg and bg depending on whether
+            // the bit is 1 or 0 respectively.
             *pixel_ptr++ = (fg - bg) * bit + bg;
           }
         });
