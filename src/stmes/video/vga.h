@@ -1,6 +1,7 @@
 #pragma once
 
 #include "stmes/gpio.h"
+#include "stmes/kernel/task.h"
 #include "stmes/utils.h"
 #include <stm32f4xx_hal.h>
 
@@ -45,6 +46,8 @@ extern volatile struct VgaControlBlock {
   const VgaPixel* next_scanline;
   struct VgaFrameConfig frame_config;
 } vga_control;
+
+extern struct Notification vga_notification;
 
 __STATIC_FORCEINLINE bool vga_take_scanline_request(u16* line_nr) {
   if (vga_control.next_scanline_requested) {

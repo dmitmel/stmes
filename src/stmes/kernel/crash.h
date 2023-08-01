@@ -13,7 +13,7 @@ __NO_RETURN void crash(const char* message, const char* src_file, u32 src_line);
 
 #define ASSERT(expr)                                 \
   do {                                               \
-    if (!likely(expr)) {                             \
+    if (unlikely(!(expr))) {                         \
       crash_collect_registers();                     \
       crash("Assertion failed", __FILE__, __LINE__); \
     }                                                \

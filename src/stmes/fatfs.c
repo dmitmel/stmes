@@ -1,5 +1,6 @@
 #include "stmes/fatfs.h"
 #include "stmes/kernel/crash.h"
+#include "stmes/kernel/sync.h"
 #include "stmes/sdio.h"
 #include "stmes/utils.h"
 #include <ff.h>
@@ -15,6 +16,35 @@ static u8 dma_scratch[BLOCKSIZE] __ALIGNED(4);
 
 static volatile DSTATUS sd_status = STA_NOINIT;
 static volatile bool sd_write_done = false, sd_read_done = false;
+
+void* ff_memalloc(UINT msize) {
+  return ff_malloc(msize);
+}
+
+void ff_memfree(void* mblock) {
+  ff_free(mblock);
+}
+
+int ff_cre_syncobj(BYTE volume, struct Mutex** mutex) {
+  static struct Mutex ff_mutexes[_VOLUMES];
+  *mutex = &ff_mutexes[volume];
+  mutex_init(*mutex);
+  return true;
+}
+
+int ff_del_syncobj(struct Mutex* mutex) {
+  UNUSED(mutex);
+  return true;
+}
+
+int ff_req_grant(struct Mutex* mutex) {
+  mutex_lock(mutex);
+  return true;
+}
+
+void ff_rel_grant(struct Mutex* mutex) {
+  mutex_unlock(mutex);
+}
 
 static HAL_StatusTypeDef sd_wait_for_card_state(HAL_SD_CardStateTypedef state, u32 timeout) {
   u32 start_time = HAL_GetTick();

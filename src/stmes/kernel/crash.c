@@ -679,7 +679,7 @@ __NO_RETURN void enter_crash_screen(void) {
   u32 prev_tick = HAL_GetTick();
   const u32 BLINK_DELAY = 250;
   while (true) {
-    __WAIT_FOR_INTERRUPT();
+    WAIT_FOR_INTERRUPT();
     u16 vga_line = 0;
     if (vga_take_scanline_request(&vga_line)) {
       console_render_scanline(vga_line);

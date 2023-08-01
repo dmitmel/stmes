@@ -122,6 +122,7 @@ const struct VgaTimings VGA_TIMINGS_1024x768_60hz = {
 };
 
 volatile struct VgaControlBlock vga_control;
+struct Notification vga_notification;
 
 // These all are grouped into a common wrapper struct so as to reduce the
 // amount of generated machine code: if several internal state variables are
@@ -732,6 +733,7 @@ void vga_hsync_timer_isr(void) {
   if (LL_TIM_IsActiveFlag_CC2(timer)) {
     LL_TIM_ClearFlag_CC2(timer);
     vga_on_line_end_reached();
+    task_notify(&vga_notification);
   }
 }
 
@@ -741,6 +743,7 @@ void vga_vsync_timer_isr(void) {
     LL_TIM_ClearFlag_CC1(timer);
     u32 line_nr = vga_on_line_start();
     LL_TIM_OC_SetCompareCH1(timer, line_nr);
+    task_notify(&vga_notification);
   }
 }
 

@@ -10,7 +10,7 @@
 extern "C" {
 #endif
 
-#define SIZEOF(x) (sizeof((x)) / sizeof(*(x)))
+#define SIZEOF(x) (sizeof((x)) / sizeof((x)[0]))
 
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -21,6 +21,7 @@ extern "C" {
 
 #define BIT(i) (1 << (i))
 #define MASK(i) ((1 << (i)) - 1)
+#define EXTRACT_BITS(val, pos, len) (((val) >> (pos)) & ((1 << (len)) - 1))
 
 // clang-format off
 #define BITS4(a,b,c,d) ((a)<<3 | (b)<<2 | (c)<<1 | (d)<<0)
@@ -68,9 +69,9 @@ void fast_memcpy_u16(u16* dst, const u16* src, usize n);
 void fast_memcpy_u32(u32* dst, const u32* src, usize n);
 
 // <https://stackoverflow.com/q/19965076/12005228>
-#define __MEMORY_BARRIER() __ASM volatile("" ::: "memory")
-#define __WAIT_FOR_EVENT() __WFE()
-#define __WAIT_FOR_INTERRUPT() __WFI()
+#define COMPILER_MEMORY_BARRIER() __ASM volatile("" ::: "memory")
+#define WAIT_FOR_EVENT() __WFE()
+#define WAIT_FOR_INTERRUPT() __WFI()
 
 #define __ldmia2(ptr, r1, r2, a, b)                                                              \
   do {                                                                                           \
@@ -138,6 +139,9 @@ void fast_memcpy_u32(u32* dst, const u32* src, usize n);
   ((volatile u32*)(bb_base + 32ul * ((usize)(addr) - (base)) + 4ul * (bit)))
 #define SRAM1_BITBAND_ADDR(addr, bit) BITBAND_ADDR(SRAM1_BASE, SRAM1_BB_BASE, addr, bit)
 #define PERIPH_BITBAND_ADDR(addr, bit) BITBAND_ADDR(PERIPH_BASE, PERIPH_BB_BASE, addr, bit)
+
+#define interrupt_number() (__get_IPSR())
+#define in_interrupt_handler() (__get_IPSR() != 0)
 
 #ifdef __cplusplus
 }

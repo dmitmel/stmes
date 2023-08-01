@@ -243,7 +243,7 @@ void console_init(void) {
 
 __NO_RETURN void console_main_loop(void) {
   while (true) {
-    __WAIT_FOR_INTERRUPT();
+    WAIT_FOR_INTERRUPT();
 
     u16 vga_line = 0;
     if (vga_take_scanline_request(&vga_line)) {

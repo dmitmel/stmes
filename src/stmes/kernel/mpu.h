@@ -1,7 +1,7 @@
 #pragma once
 
 #include "stmes/utils.h"
-#include <stdlib.h>
+#include <stm32f4xx_hal.h>
 
 #ifdef __cplusplus
 extern "C" {

@@ -2,31 +2,68 @@
 
 #include "stmes/kernel/task.h"
 #include "stmes/kernel/crash.h"
+#include "stmes/utils.h"
+#include <stdlib.h>
 
-#define STACK_CHECK_VALUE 0xBAADF00D
+#define STACK_CHECK_VALUE 0x57ACCE4D // STACCEND or something
 
-struct Task* current_task;
+static struct TaskSchedulerState {
+  struct Task* current_task;
+  struct Task* alive_tasks[MAX_ALIVE_TASKS];
+  TasksMask alive_tasks_mask, sleeping_tasks_mask, woken_up_tasks_mask, active_timers_mask;
+} scheduler_state;
+
 TaskSchedulerFunc* task_scheduler;
 
 struct TaskStackedContext {
   u32 control, r4, r5, r6, r7, r8, r9, r10, r11, pc;
 };
 
+struct Task* get_task_by_id(TaskId id) {
+  struct TaskSchedulerState* state = &scheduler_state;
+  ASSERT(id < SIZEOF(state->alive_tasks));
+  struct Task* task = state->alive_tasks[id];
+  ASSERT(task != NULL);
+  return task;
+}
+
+struct Task* get_current_task(void) {
+  return scheduler_state.current_task;
+}
+
 static void task_launchpad(void) {
-  current_task->user_data = current_task->func(current_task->user_data);
-  current_task->dead = true;
+  struct Task* task = scheduler_state.current_task;
+  task->user_data = task->func(task->user_data);
   task_yield();
 }
 
-void task_init(struct Task* task) {
-  ASSERT(task->func != NULL);
-  ASSERT(task->stack_start != NULL);
-  ASSERT(task->stack_size != 0);
-  ASSERT((usize)task->stack_start % 8 == 0);
-  task->stack_ptr = task->stack_start + task->stack_size;
-  ASSERT((usize)task->stack_ptr % 8 == 0);
-  task->dead = false;
-  task->next = NULL;
+void task_spawn(struct Task* task, const struct TaskParams* params) {
+  ASSERT(task != NULL);
+  ASSERT(params != NULL);
+  struct TaskSchedulerState* state = &scheduler_state;
+  for (usize i = 0; i < SIZEOF(state->alive_tasks); i++) {
+    ASSERT(state->alive_tasks[i] != task);
+  }
+
+  usize free_idx = 0;
+  for (; free_idx < SIZEOF(state->alive_tasks); free_idx++) {
+    if (state->alive_tasks[free_idx] == NULL) break;
+  }
+  ASSERT(free_idx < SIZEOF(state->alive_tasks));
+
+  ASSERT(params->func != NULL);
+  ASSERT(params->stack_start != NULL);
+  ASSERT(params->stack_size != 0);
+  ASSERT((usize)params->stack_start % 8 == 0);
+  ASSERT((usize)params->stack_size % 8 == 0);
+  task->stack_ptr = params->stack_start + params->stack_size;
+  task->id = free_idx;
+  task->wait_deadline = NO_DEADLINE;
+  task->execution_time = 0;
+  task->stack_start = params->stack_start;
+  task->stack_size = params->stack_size;
+  task->func = params->func;
+  task->user_data = params->user_data;
 
   fast_memset_u32((u32*)task->stack_start, STACK_CHECK_VALUE, task->stack_size / sizeof(u32));
 
@@ -42,6 +79,9 @@ void task_init(struct Task* task) {
   ctx->r4 = 4, ctx->r5 = 5, ctx->r6 = 6, ctx->r7 = 7;
   ctx->r8 = 8, ctx->r9 = 9, ctx->r10 = 10, ctx->r11 = 11;
   ctx->pc = (usize)task_launchpad;
+
+  state->alive_tasks[free_idx] = task;
+  __atomic_fetch_or(&state->alive_tasks_mask, BIT(task->id), __ATOMIC_RELEASE);
 }
 
 // Approximately measures the highest stack usage of a task.
@@ -50,6 +90,55 @@ usize task_stack_high_watermark(struct Task* task) {
   u32* end = (u32*)(task->stack_start + task->stack_size);
   while (ptr < end && *ptr == STACK_CHECK_VALUE) ptr++;
   return (usize)end - (usize)ptr;
+}
+
+struct Task* task_standard_scheduler(struct Task* prev_task) {
+  struct TaskSchedulerState* state = &scheduler_state;
+  Instant time = systime_now();
+  UNUSED(time);
+
+  TasksMask alive_mask = __atomic_load_n(&state->alive_tasks_mask, __ATOMIC_ACQUIRE);
+  TasksMask wake_up_mask = __atomic_exchange_n(&state->woken_up_tasks_mask, 0, __ATOMIC_ACQUIRE);
+  TasksMask sleeping_mask =
+    __atomic_and_fetch(&state->sleeping_tasks_mask, alive_mask & ~wake_up_mask, __ATOMIC_ACQ_REL);
+  TasksMask ready_mask = alive_mask & ~sleeping_mask;
+
+  if (ready_mask == 0) {
+    return NULL;
+  }
+
+  u32 roundrobin_rotation = prev_task->id + 1;
+  u32 ready_mask_rotated = __ROR((u32)ready_mask, roundrobin_rotation);
+  TaskId id = (__builtin_ctz(ready_mask_rotated) + roundrobin_rotation) % (sizeof(ready_mask) * 8);
+  return state->alive_tasks[id];
+}
+
+void task_process_timers(void) {
+  struct TaskSchedulerState* state = &scheduler_state;
+  Instant time = systime_now();
+  u32 next_closest_deadline = UINT32_MAX;
+
+  TasksMask wake_up_mask = 0;
+  TasksMask alive_mask = __atomic_load_n(&state->alive_tasks_mask, __ATOMIC_ACQUIRE);
+  TasksMask timers_mask = __atomic_load_n(&state->active_timers_mask, __ATOMIC_ACQUIRE);
+  timers_mask &= alive_mask;
+
+  while (timers_mask != 0) {
+    TaskId id = __builtin_ctz(timers_mask);
+    timers_mask &= ~BIT(id);
+    struct Task* task = state->alive_tasks[id];
+    Instant deadline = task->wait_deadline;
+    if (time >= deadline) {
+      wake_up_mask |= BIT(id);
+    } else if ((u32)deadline < next_closest_deadline) {
+      next_closest_deadline = (u32)deadline;
+    }
+  }
+
+  __atomic_fetch_and(&state->active_timers_mask, alive_mask & ~wake_up_mask, __ATOMIC_RELEASE);
+  __atomic_fetch_or(&state->woken_up_tasks_mask, wake_up_mask, __ATOMIC_RELEASE);
+  // TODO: Race condition here?
+  hwtimer_set_alarm(next_closest_deadline);
 }
 
 // Calls the scheduler and performs a context switch. Has to be written in
@@ -116,14 +205,16 @@ __attribute__((naked)) void task_yield(void) {
     "str r1, [r0, #0]\n\t"
     // Load the address of task_scheduler, the note about movw+movt from above
     // applies here as well.
-    "movw r2, #:lower16:%1\n\t"
-    "movt r2, #:upper16:%1\n\t"
+    "movw r5, #:lower16:%1\n\t"
+    "movt r5, #:upper16:%1\n\t"
+    "1:\n\t"
     // Load the scheduler function pointer.
-    "ldr r2, [r2]\n\t"
+    "ldr r2, [r5]\n\t"
     // Call the scheduler function. The pointer to the current task is in r0
     // currently, the stack pointer is in r1 - the 1st and 2nd argument
     // registers respectively.
     "blx r2\n\t"
+    "cbz r0, 2f\n\t"
     // The scheduler returns a pointer to the next task (in r0) we want to
     // switch to. Store it in current_task.
     "str r0, [r4]\n\t"
@@ -147,17 +238,54 @@ __attribute__((naked)) void task_yield(void) {
     // Confirm the changes to the CONTROL register.
     "isb\n\t"
     // And, finally, return from this function, jumping into the next task.
-    "bx lr\n\t" :: //
-    "i"(&current_task),
+    "bx lr\n\t"
+    "2:\n\t"
+    "ldr r0, [r4]\n\t"
+    "ldr r1, [r0, #0]\n\t"
+    "b 1b\n\t" :: //
+    "i"(&scheduler_state.current_task),
     "i"(&task_scheduler)
   );
 }
 
-void task_sleep(u32 ms) {
-  u32 start = HAL_GetTick();
-  // Using `<=` instead of `<` to guarantee that we never sleep for less time
-  // than requested.
-  while (HAL_GetTick() - start <= ms) {
-    task_yield();
+void task_start_scheduling(void) {
+  static struct Task fake_task;
+  scheduler_state.current_task = &fake_task;
+  task_yield();
+}
+
+void task_wait_for_events(Instant deadline) {
+  struct TaskSchedulerState* state = &scheduler_state;
+  struct Task* task = state->current_task;
+  if (likely(deadline != NO_DEADLINE)) {
+    __atomic_fetch_and(&state->active_timers_mask, ~BIT(task->id), __ATOMIC_ACQUIRE);
+    task->wait_deadline = deadline;
+    __atomic_fetch_or(&state->active_timers_mask, BIT(task->id), __ATOMIC_RELEASE);
+    task_process_timers();
   }
+  __atomic_fetch_or(&state->sleeping_tasks_mask, BIT(task->id), __ATOMIC_RELEASE);
+  task_yield();
+}
+
+void task_sleep(u32 delay) {
+  Instant deadline = systime_now() + delay;
+  // TODO: Ensure minimum sleep time?
+  while (systime_now() < deadline) {
+    task_wait_for_events(deadline);
+  }
+}
+
+void task_notify_init(struct Notification* self) {
+  __atomic_store_n(&self->waiters, 0, __ATOMIC_RELAXED);
+}
+
+void task_wait_until(struct Notification* notify, Instant deadline) {
+  __atomic_fetch_or(&notify->waiters, BIT(scheduler_state.current_task->id), __ATOMIC_RELAXED);
+  task_wait_for_events(deadline);
+}
+
+bool task_notify(struct Notification* notify) {
+  TasksMask waiters = __atomic_exchange_n(&notify->waiters, 0, __ATOMIC_RELAXED);
+  __atomic_fetch_or(&scheduler_state.woken_up_tasks_mask, waiters, __ATOMIC_RELEASE);
+  return waiters != 0;
 }

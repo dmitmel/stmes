@@ -1,5 +1,6 @@
 #include "stmes/interrupts.h"
 #include "stmes/dma.h"
+#include "stmes/kernel/time.h"
 #include "stmes/sdio.h"
 #include "stmes/video/vga.h"
 #include <stm32f4xx_hal.h>
@@ -53,4 +54,8 @@ __USED void TIM1_BRK_TIM9_IRQHandler(void) {
 
 __USED void TIM2_IRQHandler(void) {
   vga_hsync_timer_isr();
+}
+
+__USED void TIM5_IRQHandler(void) {
+  systime_hwtimer_isr();
 }

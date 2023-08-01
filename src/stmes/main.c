@@ -5,8 +5,8 @@
 #include "stmes/kernel/crash.h"
 #include "stmes/kernel/mpu.h"
 #include "stmes/kernel/task.h"
+#include "stmes/kernel/time.h"
 #include "stmes/sdio.h"
-#include "stmes/timers.h"
 #include "stmes/utils.h"
 #include "stmes/video/console.h"
 #include "stmes/video/framebuf.h"
@@ -44,27 +44,50 @@ static __NO_RETURN void terminal_demo(void);
 static __NO_RETURN void video_player_demo(void);
 static __NO_RETURN void image_viewer_demo(void);
 
-static void* main_task_fn(void*);
-static void* test_task_fn(void*);
+static TaskSchedulerFunc video_phase_scheduler;
+static TaskSchedulerFunc vblank_phase_scheduler;
 
-static u8 main_task_stack[512] __ALIGNED(8);
-static struct Task main_task = {
-  .stack_start = main_task_stack,
-  .stack_size = sizeof(main_task_stack),
-  .func = &main_task_fn,
-};
+static TaskFunc render_task_fn;
+static u8 render_task_stack[1024] __ALIGNED(8);
+static struct Task render_task;
 
+static TaskFunc test_task_fn;
 static u8 test_task_stack[1024] __ALIGNED(8);
-static struct Task test_task = {
-  .stack_start = test_task_stack,
-  .stack_size = sizeof(test_task_stack),
-  .func = &test_task_fn,
-};
+static struct Task test_task;
 
-static struct Task* simple_task_scheduler(struct Task* prev_task) {
-  struct Task* next_task = prev_task->next;
-  while (next_task->dead) {
-    next_task = next_task->next;
+static TaskFunc progress_task_fn;
+static u8 progress_task_stack[1024] __ALIGNED(8);
+static struct Task progress_task;
+
+static struct Notification progress_task_notify;
+
+static struct Task* video_phase_scheduler(struct Task* prev_task) {
+  if (likely(vga_control.next_scanline_requested)) {
+    return &render_task;
+  }
+  if (vga_control.entering_vblank) {
+    task_scheduler = vblank_phase_scheduler;
+    return NULL;
+  }
+  struct Task* next_task = task_standard_scheduler(prev_task);
+  if (next_task == NULL) {
+    WAIT_FOR_INTERRUPT();
+  }
+  return next_task;
+}
+
+static struct Task* vblank_phase_scheduler(struct Task* prev_task) {
+  if (vga_control.entering_frame) {
+    vga_control.entering_frame = false;
+    task_scheduler = video_phase_scheduler;
+    return NULL;
+  }
+  if (vga_control.entering_vblank) {
+    return &render_task;
+  }
+  struct Task* next_task = task_standard_scheduler(prev_task);
+  if (next_task == NULL) {
+    WAIT_FOR_INTERRUPT();
   }
   return next_task;
 }
@@ -89,7 +112,10 @@ int main(void) {
 #endif
 
   HAL_Init();
+  // TODO: this function needs HAL_GetTick to be ready
   SystemClock_Config();
+
+  hwtimer_init();
 
   console_init();
 
@@ -104,21 +130,36 @@ int main(void) {
   // Wait a bit for the display to initialize
   HAL_Delay(1500);
 
-  // task_init(&main_task);
-  // task_init(&test_task);
-  //
-  // main_task.next = &test_task;
-  // test_task.next = &main_task;
-  // task_scheduler = &simple_task_scheduler;
-  //
-  // static struct Task fake_task;
-  // fake_task.next = &main_task;
-  // current_task = &fake_task;
-  // task_yield();
+  task_scheduler = &vblank_phase_scheduler;
 
+  task_notify_init(&progress_task_notify);
+
+  struct TaskParams render_task_params = {
+    .stack_start = render_task_stack,
+    .stack_size = sizeof(render_task_stack),
+    .func = &render_task_fn,
+  };
+  task_spawn(&render_task, &render_task_params);
+
+  struct TaskParams test_task_params = {
+    .stack_start = test_task_stack,
+    .stack_size = sizeof(test_task_stack),
+    .func = &test_task_fn,
+  };
+  task_spawn(&test_task, &test_task_params);
+
+  struct TaskParams progress_task_params = {
+    .stack_start = progress_task_stack,
+    .stack_size = sizeof(progress_task_stack),
+    .func = &progress_task_fn,
+  };
+  task_spawn(&progress_task, &progress_task_params);
+
+  task_start_scheduling();
   // video_player_demo();
   // terminal_demo();
-  image_viewer_demo();
+  // image_viewer_demo();
+  // console_main_loop();
 }
 
 static FATFS SDFatFS;
@@ -134,25 +175,20 @@ static void* test_task_fn(void* user_data) {
 
   console_clear_screen();
 
-  static FATFS SDFatFS;
-  static FIL SDFile;
   check_fs_error(f_mount(&SDFatFS, "", 1));
   check_fs_error(f_open(&SDFile, "bebop_palette.bin", FA_READ));
-  FSIZE_t video_file_len = f_size(&SDFile);
 
-  printf("loading %lu\n", video_file_len);
+  printf("loading %lu\n", f_size(&SDFile));
   task_yield();
 
   usize total_bytes = 0;
   usize buf_size = BLOCKSIZE * 16;
   char* buf = malloc(buf_size);
-  u32 start_time = HAL_GetTick();
   u32 start_cycles = DWT->CYCCNT;
 
   while (true) {
-    console_clear_cursor_line();
-    printf("\r%lu%% %" PRIu32, f_tell(&SDFile) * 100 / video_file_len, HAL_GetTick() - start_time);
     task_yield();
+    task_notify(&progress_task_notify);
     usize bytes_read = 0;
     if (f_read(&SDFile, buf, buf_size, &bytes_read) != FR_OK) {
       break;
@@ -162,6 +198,8 @@ static void* test_task_fn(void* user_data) {
     }
     total_bytes += bytes_read;
   }
+  task_notify(&progress_task_notify);
+  task_yield();
 
   u32 end_cycles = DWT->CYCCNT;
   free(buf);
@@ -173,21 +211,37 @@ static void* test_task_fn(void* user_data) {
   printf("%f kB/sec\n", (total_bytes / 1024.0f) / elapsed_seconds);
   printf("%f MB/sec\n", (total_bytes / 1024.0f / 1024.0f) / elapsed_seconds);
 
+  while (true) {
+    task_yield();
+  }
+
   return user_data;
 }
 
-static void* main_task_fn(void* user_data) {
+static void* progress_task_fn(void* user_data) {
+  task_wait(&progress_task_notify);
+  u32 start_time = systime_now();
   while (true) {
-    u16 vga_line = 0;
-    if (vga_take_scanline_request(&vga_line)) {
-      console_render_scanline(vga_line);
+    task_wait(&progress_task_notify);
+    console_clear_cursor_line();
+    u32 percent = f_tell(&SDFile) * 100 / f_size(&SDFile);
+    printf("\r%" PRIu32 "%% %" PRIu32, percent, (u32)(systime_now() - start_time));
+    task_sleep(100);
+  }
+  return user_data;
+}
+
+static void* render_task_fn(void* user_data) {
+  while (true) {
+    task_wait(&vga_notification);
+    if (vga_control.next_scanline_requested) {
+      vga_control.next_scanline_requested = false;
+      console_render_scanline(vga_control.next_scanline_nr);
     }
     if (vga_control.entering_vblank) {
       vga_control.entering_vblank = false;
       console_setup_frame_config();
-      task_yield();
     }
-    __WAIT_FOR_INTERRUPT();
   }
   return user_data;
 }
@@ -258,7 +312,7 @@ static __NO_RETURN void terminal_demo(void) {
         }
       }
     }
-    __WAIT_FOR_INTERRUPT();
+    WAIT_FOR_INTERRUPT();
   }
 }
 
@@ -451,7 +505,7 @@ static __NO_RETURN void video_player_demo(void) {
       }
     }
 
-    __WAIT_FOR_INTERRUPT();
+    WAIT_FOR_INTERRUPT();
   }
 }
 
@@ -548,7 +602,7 @@ static __NO_RETURN void image_viewer_demo(void) {
       }
     }
 
-    __WAIT_FOR_INTERRUPT();
+    WAIT_FOR_INTERRUPT();
   }
 }
 
@@ -585,11 +639,4 @@ void SystemClock_Config(void) {
   };
   u32 flash_latency = FLASH_LATENCY_3;
   check_hal_error(HAL_RCC_ClockConfig(&rcc_clk_init, flash_latency));
-}
-
-HAL_StatusTypeDef HAL_InitTick(u32 priority) {
-  UNUSED(priority);
-  MX_TIM5_Init();
-  check_hal_error(HAL_TIM_Base_Start(&htim5));
-  return HAL_OK;
 }

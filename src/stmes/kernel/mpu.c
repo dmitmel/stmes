@@ -274,7 +274,7 @@ bool mpu_match_region(usize address, u32* out_attrs) {
 // and known access circumstances.
 enum MpuFaultDiagnosis
 mpu_diagnose_memfault(usize address, bool instruction_access, bool privileged_access) {
-  if (address == 0) {
+  if (address <= 1024 * 1024) {
     return MPU_FAULT_NULL_POINTER;
   }
 
