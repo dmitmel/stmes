@@ -20,6 +20,7 @@
 #include "stmes/kernel/crash.h"
 #include "stmes/kernel/task.h"
 #include "stmes/kernel/time.h"
+#include <printf.h>
 #include <stm32f4xx_hal.h>
 
 SD_HandleTypeDef hsd;
@@ -146,6 +147,25 @@ bool BSP_SD_IsDetected(void) {
   return HAL_GPIO_ReadPin(SDIO_CD_GPIO_Port, SDIO_CD_Pin) == GPIO_PIN_RESET;
 }
 
+// Some constants that aren't defined in the HAL headers:
+
+// clang-format off
+#define SDMMC_R4_ILLEGAL_CMD            0x00000004u
+#define SDMMC_R4_COM_CRC_FAILED         0x00000008u
+#define SDMMC_R4_INVALID_FUNCTION_NUM   0x00000010u
+#define SDMMC_R4_INVALID_PARAMETER      0x00000040u
+#define SDMMC_R4_ERRORBITS              0x0000005Cu
+
+#define SDMMC_R5_ARG_OUT_OF_RANGE       0x00000001u
+#define SDMMC_R5_INVALID_FUNCTION_NUM   0x00000002u
+#define SDMMC_R5_GENERAL_UNKNOWN_ERROR  0x00000008u
+#define SDMMC_R5_ILLEGAL_CMD            0x00000040u
+#define SDMMC_R5_COM_CRC_FAILED         0x00000080u
+#define SDMMC_R5_ERRORBITS              0x000000CBu
+
+#define SDMMC_R6_ERRORBITS              0x0000E000u
+// clang-format on
+
 // The error bits in the mapping tables are stored not as 32-bit masks (as they
 // are defined in the HAL headers), but as bit positions, which gives a 4x
 // reduction in size.
@@ -183,6 +203,26 @@ static const struct SdioErrorDef SDIO_ERRORS_R1[] = {
   // clang-format on
 };
 
+static const struct SdioErrorDef SDIO_ERRORS_R4[] = {
+  // clang-format off
+  { ERROR_BIT(SDMMC_R4_ILLEGAL_CMD),            ERROR_BIT(SDMMC_ERROR_ILLEGAL_CMD)            },
+  { ERROR_BIT(SDMMC_R4_COM_CRC_FAILED),         ERROR_BIT(SDMMC_ERROR_COM_CRC_FAILED)         },
+  { ERROR_BIT(SDMMC_R4_INVALID_FUNCTION_NUM),   ERROR_BIT(SDMMC_ERROR_REQUEST_NOT_APPLICABLE) },
+  { ERROR_BIT(SDMMC_R4_INVALID_PARAMETER),      ERROR_BIT(SDMMC_ERROR_INVALID_PARAMETER)      },
+  { ERROR_BIT(SDMMC_R4_COM_CRC_FAILED),         ERROR_BIT(SDMMC_ERROR_COM_CRC_FAILED)         },
+  // clang-format on
+};
+
+static const struct SdioErrorDef SDIO_ERRORS_R5[] = {
+  // clang-format off
+  { ERROR_BIT(SDMMC_R5_ARG_OUT_OF_RANGE),       ERROR_BIT(SDMMC_ERROR_ADDR_OUT_OF_RANGE)      },
+  { ERROR_BIT(SDMMC_R5_INVALID_FUNCTION_NUM),   ERROR_BIT(SDMMC_ERROR_REQUEST_NOT_APPLICABLE) },
+  { ERROR_BIT(SDMMC_R5_GENERAL_UNKNOWN_ERROR),  ERROR_BIT(SDMMC_ERROR_GENERAL_UNKNOWN_ERR)    },
+  { ERROR_BIT(SDMMC_R5_ILLEGAL_CMD),            ERROR_BIT(SDMMC_ERROR_ILLEGAL_CMD)            },
+  { ERROR_BIT(SDMMC_R5_COM_CRC_FAILED),         ERROR_BIT(SDMMC_ERROR_COM_CRC_FAILED)         },
+  // clang-format on
+};
+
 static const struct SdioErrorDef SDIO_ERRORS_R6[] = {
   // clang-format off
   { ERROR_BIT(SDMMC_R6_ILLEGAL_CMD),            ERROR_BIT(SDMMC_ERROR_ILLEGAL_CMD)          },
@@ -202,12 +242,13 @@ static const struct SdioErrorDef SDIO_ERRORS_R6[] = {
 static u32 sdio_check_response_error(
   u32 response, const struct SdioErrorDef* error_defs, usize error_defs_len
 ) {
+  u32 error_bits = SDMMC_ERROR_NONE;
   for (usize i = 0; i < error_defs_len; i++) {
     if (response & BIT(error_defs[i].response_bit)) {
-      return BIT(error_defs[i].error_bit);
+      error_bits |= error_defs[i].error_bit;
     }
   }
-  return SDMMC_ERROR_NONE;
+  return error_bits;
 }
 
 // Sends an SD/MMC command with a specified argument, waits for a response and
@@ -277,13 +318,13 @@ sdio_send_command_impl(SDIO_TypeDef* SDIOx, u32 arg, u8 cmd, enum SdioResponseFo
     // Since this normally can't happen by definition, the CRC error is treated
     // as a success condition for responses where the SD protocol doesn't
     // specify a field for the CRC.
-    if (likely(res != SDIO_RESPONSE_R3)) {
+    if (likely(res != SDIO_RESPONSE_R3 && res != SDIO_RESPONSE_R4)) {
       return SDMMC_ERROR_CMD_CRC_FAIL;
     }
   }
 
   // Not every response format has a command index field.
-  if (likely(res != SDIO_RESPONSE_R2 && res != SDIO_RESPONSE_R3)) {
+  if (likely(res != SDIO_RESPONSE_R2 && res != SDIO_RESPONSE_R3 && res != SDIO_RESPONSE_R4)) {
     u8 res_cmd = (READ_REG(SDIOx->RESPCMD) & SDIO_RESPCMD_RESPCMD_Msk) >> SDIO_RESPCMD_RESPCMD_Pos;
     if (unlikely(res_cmd != cmd)) {
       return SDMMC_ERROR_CMD_CRC_FAIL;
@@ -297,9 +338,19 @@ sdio_send_command_impl(SDIO_TypeDef* SDIOx, u32 arg, u8 cmd, enum SdioResponseFo
     if ((res_r1 & SDMMC_OCR_ERRORBITS) != 0) {
       return sdio_check_response_error(res_r1, SDIO_ERRORS_R1, SIZEOF(SDIO_ERRORS_R1));
     }
+  } else if (unlikely(res == SDIO_RESPONSE_R4)) {
+    u32 res_r1 = READ_REG(SDIOx->RESP1);
+    if ((res_r1 & SDMMC_R4_ERRORBITS) != 0) {
+      return sdio_check_response_error(res_r1, SDIO_ERRORS_R4, SIZEOF(SDIO_ERRORS_R4));
+    }
+  } else if (unlikely(res == SDIO_RESPONSE_R5)) {
+    u32 res_r1 = READ_REG(SDIOx->RESP1);
+    if ((res_r1 & SDMMC_R5_ERRORBITS) != 0) {
+      return sdio_check_response_error(res_r1, SDIO_ERRORS_R5, SIZEOF(SDIO_ERRORS_R5));
+    }
   } else if (unlikely(res == SDIO_RESPONSE_R6)) {
     u32 res_r1 = READ_REG(SDIOx->RESP1);
-    if ((res_r1 & (SDMMC_R6_ILLEGAL_CMD | SDMMC_R6_COM_CRC_FAILED | SDMMC_R6_GENERAL_UNKNOWN_ERROR)) != 0) {
+    if ((res_r1 & SDMMC_R6_ERRORBITS) != 0) {
       return sdio_check_response_error(res_r1, SDIO_ERRORS_R6, SIZEOF(SDIO_ERRORS_R6));
     }
   }
@@ -431,4 +482,60 @@ u32 SDMMC_CmdAppOperCommand(SDIO_TypeDef* SDIOx, u32 arg) {
 
 u32 SDMMC_CmdSendSCR(SDIO_TypeDef* SDIOx) {
   return sdio_send_command_r1(SDIOx, 0, SDMMC_CMD_SD_APP_SEND_SCR);
+}
+
+__NO_RETURN void crash_on_sd_error(u32 code, const char* file, u32 line) {
+  static const char* const ERROR_NAMES[] = {
+    [ERROR_BIT(SDMMC_ERROR_CMD_CRC_FAIL)] = "CMD_CRC_FAIL",
+    [ERROR_BIT(SDMMC_ERROR_DATA_CRC_FAIL)] = "DATA_CRC_FAIL",
+    [ERROR_BIT(SDMMC_ERROR_CMD_RSP_TIMEOUT)] = "CMD_RSP_TIMEOUT",
+    [ERROR_BIT(SDMMC_ERROR_DATA_TIMEOUT)] = "DATA_TIMEOUT",
+    [ERROR_BIT(SDMMC_ERROR_TX_UNDERRUN)] = "TX_UNDERRUN",
+    [ERROR_BIT(SDMMC_ERROR_RX_OVERRUN)] = "RX_OVERRUN",
+    [ERROR_BIT(SDMMC_ERROR_ADDR_MISALIGNED)] = "ADDR_MISALIGNED",
+    [ERROR_BIT(SDMMC_ERROR_BLOCK_LEN_ERR)] = "BLOCK_LEN_ERR",
+    [ERROR_BIT(SDMMC_ERROR_ERASE_SEQ_ERR)] = "ERASE_SEQ_ERR",
+    [ERROR_BIT(SDMMC_ERROR_BAD_ERASE_PARAM)] = "BAD_ERASE_PARAM",
+    [ERROR_BIT(SDMMC_ERROR_WRITE_PROT_VIOLATION)] = "WRITE_PROT_VIOLATION",
+    [ERROR_BIT(SDMMC_ERROR_LOCK_UNLOCK_FAILED)] = "LOCK_UNLOCK_FAILED",
+    [ERROR_BIT(SDMMC_ERROR_COM_CRC_FAILED)] = "COM_CRC_FAILED",
+    [ERROR_BIT(SDMMC_ERROR_ILLEGAL_CMD)] = "ILLEGAL_CMD",
+    [ERROR_BIT(SDMMC_ERROR_CARD_ECC_FAILED)] = "CARD_ECC_FAILED",
+    [ERROR_BIT(SDMMC_ERROR_CC_ERR)] = "CC_ERR",
+    [ERROR_BIT(SDMMC_ERROR_GENERAL_UNKNOWN_ERR)] = "GENERAL_UNKNOWN_ERR",
+    [ERROR_BIT(SDMMC_ERROR_STREAM_READ_UNDERRUN)] = "STREAM_READ_UNDERRUN",
+    [ERROR_BIT(SDMMC_ERROR_STREAM_WRITE_OVERRUN)] = "STREAM_WRITE_OVERRUN",
+    [ERROR_BIT(SDMMC_ERROR_CID_CSD_OVERWRITE)] = "CID_CSD_OVERWRITE",
+    [ERROR_BIT(SDMMC_ERROR_WP_ERASE_SKIP)] = "WP_ERASE_SKIP",
+    [ERROR_BIT(SDMMC_ERROR_CARD_ECC_DISABLED)] = "CARD_ECC_DISABLED",
+    [ERROR_BIT(SDMMC_ERROR_ERASE_RESET)] = "ERASE_RESET",
+    [ERROR_BIT(SDMMC_ERROR_AKE_SEQ_ERR)] = "AKE_SEQ_ERR",
+    [ERROR_BIT(SDMMC_ERROR_INVALID_VOLTRANGE)] = "INVALID_VOLTRANGE",
+    [ERROR_BIT(SDMMC_ERROR_ADDR_OUT_OF_RANGE)] = "ADDR_OUT_OF_RANGE",
+    [ERROR_BIT(SDMMC_ERROR_REQUEST_NOT_APPLICABLE)] = "REQUEST_NOT_APPLICABLE",
+    [ERROR_BIT(SDMMC_ERROR_INVALID_PARAMETER)] = "INVALID_PARAMETER",
+    [ERROR_BIT(SDMMC_ERROR_UNSUPPORTED_FEATURE)] = "UNSUPPORTED_FEATURE",
+    [ERROR_BIT(SDMMC_ERROR_BUSY)] = "BUSY",
+    [ERROR_BIT(SDMMC_ERROR_DMA)] = "DMA",
+    [ERROR_BIT(SDMMC_ERROR_TIMEOUT)] = "TIMEOUT",
+  };
+
+  char msg[64];
+  usize msg_pos = 0;
+  i32 msg_written = snprintf(msg, sizeof(msg), "0x%08" PRIX32, code);
+  msg_pos += MAX(0, msg_written);
+
+  if (code == 0) {
+    code = SDMMC_ERROR_GENERAL_UNKNOWN_ERR;
+  }
+  while (code != 0) {
+    u32 bit = 31 - __CLZ(code);
+    code ^= BIT(bit);
+
+    const char* name = bit < SIZEOF(ERROR_NAMES) ? ERROR_NAMES[bit] : "UNKNOWN";
+    msg_written = snprintf(msg + msg_pos, sizeof(msg) - msg_pos, "/SD_%s", name);
+    msg_pos += MAX(0, msg_written);
+  }
+
+  crash(msg, file, line);
 }
