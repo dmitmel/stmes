@@ -110,3 +110,7 @@ u32 HAL_GetTick(void) { return __hwtimer_read(); }
 void HAL_SuspendTick(void) {}
 void HAL_ResumeTick(void) {}
 // clang-format on
+
+void SysTick_Handler(void) {
+  HAL_IncTick();
+}

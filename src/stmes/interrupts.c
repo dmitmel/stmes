@@ -5,17 +5,6 @@
 
 extern u32 _estack;
 
-// A workaround for errata entry 1.2: "VDIV or VSQRT instructions might not
-// complete correctly when very short ISRs are used".
-__STATIC_FORCEINLINE void nop_interrupt(void) {
-  // The errata recommends having no less than 3 instructions (including the
-  // `bx lr`) in every ISR, but let's add more to be sure.
-  __NOP();
-  __NOP();
-  __NOP();
-  __NOP();
-}
-
 __NAKED void Reset_Handler(void) {
   // Load the initial stack pointer. C functions can be called after this.
   __ASM volatile("ldr sp, =%0" ::"i"(&_estack));
@@ -25,41 +14,21 @@ __NAKED void Reset_Handler(void) {
   __ASM volatile("udf");
 }
 
-void NMI_Handler(void) {
-  while (true) {}
-}
-
-void SVC_Handler(void) {
-  nop_interrupt();
-}
-
-void DebugMon_Handler(void) {
-  nop_interrupt();
-}
-
-void PendSV_Handler(void) {
-  nop_interrupt();
-}
-
-void SysTick_Handler(void) {
-  HAL_IncTick();
-}
-
 static void Default_Handler(void) {
   while (true) {}
 }
 
 #define ISR_WEAK __WEAK_ALIAS("Default_Handler")
 
-// ISR_WEAK void NMI_Handler(void);
+ISR_WEAK void NMI_Handler(void);
 ISR_WEAK void HardFault_Handler(void);
 ISR_WEAK void MemManage_Handler(void);
 ISR_WEAK void BusFault_Handler(void);
 ISR_WEAK void UsageFault_Handler(void);
-// ISR_WEAK void SVC_Handler(void);
-// ISR_WEAK void DebugMon_Handler(void);
-// ISR_WEAK void PendSV_Handler(void);
-// ISR_WEAK void SysTick_Handler(void);
+ISR_WEAK void SVC_Handler(void);
+ISR_WEAK void DebugMon_Handler(void);
+ISR_WEAK void PendSV_Handler(void);
+ISR_WEAK void SysTick_Handler(void);
 ISR_WEAK void WWDG_IRQHandler(void);
 ISR_WEAK void PVD_IRQHandler(void);
 ISR_WEAK void TAMP_STAMP_IRQHandler(void);
