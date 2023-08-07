@@ -9,7 +9,7 @@
 
 #include <diskio.h>
 
-#define SD_TIMEOUT 3000
+#define SD_TIMEOUT 1000
 #define SD_DEFAULT_BLOCK_SIZE 512
 
 static u8 dma_scratch[BLOCKSIZE] __ALIGNED(4);
@@ -52,6 +52,7 @@ static HAL_StatusTypeDef sd_wait_for_card_state(HAL_SD_CardStateTypedef state, u
     if (HAL_SD_GetCardState(&hsd) == state) {
       return HAL_OK;
     }
+    task_yield();
   } while (HAL_GetTick() - start_time < timeout);
   return HAL_TIMEOUT;
 }
@@ -62,6 +63,7 @@ static HAL_StatusTypeDef sd_wait_until_flag_set(volatile bool* flag, u32 timeout
     if (*flag != false) {
       return HAL_OK;
     }
+    task_yield();
   } while (HAL_GetTick() - start_time < timeout);
   return HAL_TIMEOUT;
 }
