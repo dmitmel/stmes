@@ -24,8 +24,19 @@
 #include <stm32f4xx_hal.h>
 
 SD_HandleTypeDef hsd;
-DMA_HandleTypeDef hdma_sdio_rx;
-DMA_HandleTypeDef hdma_sdio_tx;
+static DMA_HandleTypeDef hdma_sdio_rx, hdma_sdio_tx;
+
+void SDIO_IRQHandler(void) {
+  HAL_SD_IRQHandler(&hsd);
+}
+
+void DMA2_Stream3_IRQHandler(void) {
+  HAL_DMA_IRQHandler(&hdma_sdio_rx);
+}
+
+void DMA2_Stream6_IRQHandler(void) {
+  HAL_DMA_IRQHandler(&hdma_sdio_tx);
+}
 
 void MX_SDIO_SD_Init(void) {
   hsd.Instance = SDIO;

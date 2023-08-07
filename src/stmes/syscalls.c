@@ -7,7 +7,7 @@
 
 __USED void* _sbrk(ptrdiff_t incr) {
   // These three are defined by the linker script
-  extern u8 _end, _estack, _Min_Stack_Size;
+  extern u32 _end, _estack, _Min_Stack_Size;
 
   const usize stack_limit = (usize)&_estack - (usize)&_Min_Stack_Size;
   const u8* max_heap = (u8*)stack_limit;
@@ -15,7 +15,7 @@ __USED void* _sbrk(ptrdiff_t incr) {
 
   static u8* heap_end = NULL;
   if (heap_end == NULL) {
-    heap_end = &_end;
+    heap_end = (u8*)&_end;
   }
 
   // Prevent the heap from colliding with the stack

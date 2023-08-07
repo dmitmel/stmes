@@ -70,8 +70,6 @@ __STATIC_FORCEINLINE void vga_set_frame_config(const struct VgaFrameConfig* cfg)
 void vga_init(void);
 void vga_apply_timings(const struct VgaTimings* ts);
 void vga_start(void);
-void vga_hsync_timer_isr(void);
-void vga_vsync_timer_isr(void);
 void vga_deinit(void);
 
 // Since the GPIOB pins used for outputting the pixel color for VGA couldn't be

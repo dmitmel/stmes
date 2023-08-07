@@ -24,7 +24,6 @@ typedef u64 Instant;
 
 void hwtimer_init(void);
 void hwtimer_deinit(void);
-void systime_hwtimer_isr(void);
 u32 hwtimer_read(void);
 void hwtimer_set_alarm(u32 value);
 

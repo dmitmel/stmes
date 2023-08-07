@@ -60,6 +60,7 @@
 
 #include "stmes/video/vga.h"
 #include "stmes/gpio.h"
+#include "stmes/interrupts.h"
 #include "stmes/kernel/crash.h"
 #include "stmes/utils.h"
 #include <math.h>
@@ -728,7 +729,7 @@ __STATIC_FORCEINLINE void vga_on_line_end_reached(void) {
   vga_start_pixel_dma(next_scanline, state->current_frame.line_length);
 }
 
-void vga_hsync_timer_isr(void) {
+void TIM2_IRQHandler(void) {
   TIM_TypeDef* timer = TIM2;
   if (LL_TIM_IsActiveFlag_CC2(timer)) {
     LL_TIM_ClearFlag_CC2(timer);
@@ -737,7 +738,7 @@ void vga_hsync_timer_isr(void) {
   }
 }
 
-void vga_vsync_timer_isr(void) {
+void TIM1_BRK_TIM9_IRQHandler(void) {
   TIM_TypeDef* timer = TIM9;
   if (LL_TIM_IsActiveFlag_CC1(timer)) {
     LL_TIM_ClearFlag_CC1(timer);

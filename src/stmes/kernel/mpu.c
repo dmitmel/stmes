@@ -83,7 +83,7 @@ __STATIC_FORCEINLINE void mpu_setup_region(const struct MpuRegionConfig* cfg) {
 
 // Returns the lowest address the stack is allowed to descend to.
 __STATIC_FORCEINLINE usize mpu_get_stack_limit(void) {
-  extern u8 _estack, _Min_Stack_Size;
+  extern u32 _estack, _Min_Stack_Size;
   return (usize)&_estack - (usize)&_Min_Stack_Size;
 }
 

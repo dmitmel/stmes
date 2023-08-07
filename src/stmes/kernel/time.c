@@ -1,4 +1,5 @@
 #include "stmes/kernel/time.h"
+#include "stmes/interrupts.h"
 #include "stmes/kernel/crash.h"
 #include "stmes/kernel/task.h"
 #include <stm32f4xx_hal.h>
@@ -73,7 +74,7 @@ void hwtimer_set_alarm(u32 value) {
   LL_TIM_OC_SetCompareCH1(TIM5, value * HWTIMER_PRESCALER);
 }
 
-void systime_hwtimer_isr(void) {
+void TIM5_IRQHandler(void) {
   TIM_TypeDef* hwtimer = TIM5;
   if (likely(LL_TIM_IsActiveFlag_CC1(hwtimer))) {
     LL_TIM_ClearFlag_CC1(hwtimer);

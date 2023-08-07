@@ -33,7 +33,8 @@ void fast_memset_u32(u32* dst, u32 val, usize n) {
 void fast_memcpy_u8(u8* dst, const u8* src, usize n) {
   u8* end = dst;
   for (end += n - n % 4; dst != end;) {
-    UNROLL_4(*dst++ = *src++);
+    u8 a = *src++, b = *src++, c = *src++, d = *src++;
+    *dst++ = a, *dst++ = b, *dst++ = c, *dst++ = d;
   }
   for (end += n % 4; dst != end;) {
     *dst++ = *src++;
@@ -43,7 +44,8 @@ void fast_memcpy_u8(u8* dst, const u8* src, usize n) {
 void fast_memcpy_u16(u16* dst, const u16* src, usize n) {
   u16* end = dst;
   for (end += n - n % 4; dst != end;) {
-    UNROLL_4(*dst++ = *src++);
+    u16 a = *src++, b = *src++, c = *src++, d = *src++;
+    *dst++ = a, *dst++ = b, *dst++ = c, *dst++ = d;
   }
   for (end += n % 4; dst != end;) {
     *dst++ = *src++;
@@ -53,7 +55,8 @@ void fast_memcpy_u16(u16* dst, const u16* src, usize n) {
 void fast_memcpy_u32(u32* dst, const u32* src, usize n) {
   u32* end = dst;
   for (end += n - n % 4; dst != end;) {
-    UNROLL_4(*dst++ = *src++);
+    u32 a = *src++, b = *src++, c = *src++, d = *src++;
+    *dst++ = a, *dst++ = b, *dst++ = c, *dst++ = d;
   }
   for (end += n % 4; dst != end;) {
     *dst++ = *src++;

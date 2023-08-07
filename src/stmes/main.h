@@ -6,6 +6,8 @@
 extern "C" {
 #endif
 
+void prestart(void);
+int main(void);
 void SystemClock_Config(void);
 
 #ifdef __cplusplus

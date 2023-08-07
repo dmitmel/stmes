@@ -92,7 +92,18 @@ static struct Task* vblank_phase_scheduler(struct Task* prev_task) {
   return next_task;
 }
 
-int main(void) {
+void prestart(void) {
+  extern u32 _sdata, _edata, _sidata, _sbss, _ebss;
+  fast_memcpy_u32(&_sdata, &_sidata, &_edata - &_sdata);
+  fast_memset_u32(&_sbss, 0, &_ebss - &_sbss);
+
+  // Flush the pipeline in case the initialization of the memory sections above
+  // has caused any side effects, or placed any functions into RAM.
+  __DSB();
+  __ISB();
+
+  SystemInit(); // Initializes the FPU among other things
+
   crash_init_hard_faults();
   mpu_init();
 
@@ -111,6 +122,13 @@ int main(void) {
   }
 #endif
 
+  extern void __libc_init_array(void);
+  // Runs the initializers of static variables and functions marked with
+  // __attribute__((constructor)).
+  __libc_init_array();
+}
+
+int main(void) {
   HAL_Init();
   // TODO: this function needs HAL_GetTick to be ready
   SystemClock_Config();

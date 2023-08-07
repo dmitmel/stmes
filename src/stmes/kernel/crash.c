@@ -125,7 +125,7 @@ static struct CrashContext {
 // link register (LR) at the call site can't be preserved because it has to be
 // changed when branching to this function to be able to return, though this
 // stored LR will at least reflect the PC at the caller's location.
-__attribute__((naked)) void crash_collect_registers(void) {
+__NAKED void crash_collect_registers(void) {
   __ASM volatile(
     "push {lr}\n\t"           // Save the LR because we are going to use it to store the address
     "ldr lr, =%0\n\t"         // of cpu_registers. The calling convention permits the use of LR as
@@ -184,7 +184,7 @@ static u32 hardfault_handler_impl(u32 exc_return, u32 msp, u32 psp);
 // putting us in charge of maintaining the calling convention and such.
 // <https://stackoverflow.com/questions/33175120/access-c-non-pod-class-data-from-naked-asm-function>
 // <https://stackoverflow.com/questions/75699618/cortex-m4-svc-code-appears-to-always-pass-in-255-for-the-svc-number>
-static __attribute__((naked)) void hardfault_handler_entry(void) {
+static __NAKED void hardfault_handler_entry(void) {
   __ASM volatile(
     "cpsid i\n\t"            // __disable_irq()
     "push {lr}\n\t"          // I don't think we should really be ascetic with the stack because
@@ -400,10 +400,10 @@ static u32 hardfault_handler_impl(u32 exc_return, u32 msp, u32 psp) {
   return exc_return;
 }
 
-__USED void HardFault_Handler(void) __attribute__((alias("hardfault_handler_entry")));
-__USED void MemManage_Handler(void) __attribute__((alias("hardfault_handler_entry")));
-__USED void BusFault_Handler(void) __attribute__((alias("hardfault_handler_entry")));
-__USED void UsageFault_Handler(void) __attribute__((alias("hardfault_handler_entry")));
+__ALIAS("hardfault_handler_entry") void HardFault_Handler(void);
+__ALIAS("hardfault_handler_entry") void MemManage_Handler(void);
+__ALIAS("hardfault_handler_entry") void BusFault_Handler(void);
+__ALIAS("hardfault_handler_entry") void UsageFault_Handler(void);
 
 static void print_number(u32 value, u32 base) {
   base = MAX(base, 1);

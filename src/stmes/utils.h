@@ -48,6 +48,11 @@ extern "C" {
 #define STATIC_ASSERT(cond)
 #endif
 
+#define __WEAK_ALIAS(name) __attribute__((weak, alias(name)))
+#define __ALIAS(name) __attribute__((alias(name)))
+#define __SECTION(name) __attribute__((section(name)))
+#define __NAKED __attribute__((naked))
+
 typedef int8_t i8;
 typedef uint8_t u8;
 typedef int16_t i16;
