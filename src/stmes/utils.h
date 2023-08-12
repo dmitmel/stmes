@@ -19,8 +19,8 @@ extern "C" {
 #define ceil_div(a, b) ((a) / (b) + ((a) % (b) != 0))
 #define round_div(a, b) ((a) / (b) + ((a) % (b) > (b) / 2))
 
-#define BIT(i) (1 << (i))
-#define MASK(i) ((1 << (i)) - 1)
+#define BIT(i) (1u << (i))
+#define MASK(i) ((1u << (i)) - 1)
 #define EXTRACT_BITS(val, pos, len) (((val) >> (pos)) & ((1 << (len)) - 1))
 
 // clang-format off
@@ -52,6 +52,7 @@ extern "C" {
 #define __ALIAS(name) __attribute__((alias(name)))
 #define __SECTION(name) __attribute__((section(name)))
 #define __NAKED __attribute__((naked))
+#define __UNUSED __attribute__((unused))
 
 typedef int8_t i8;
 typedef uint8_t u8;

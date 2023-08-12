@@ -44,9 +44,6 @@ static __NO_RETURN void terminal_demo(void);
 static __NO_RETURN void video_player_demo(void);
 static __NO_RETURN void image_viewer_demo(void);
 
-static TaskSchedulerFunc video_phase_scheduler;
-static TaskSchedulerFunc vblank_phase_scheduler;
-
 static TaskFunc render_task_fn;
 static u8 render_task_stack[1024] __ALIGNED(8);
 static struct Task render_task;
@@ -59,38 +56,13 @@ static TaskFunc progress_task_fn;
 static u8 progress_task_stack[1024] __ALIGNED(8);
 static struct Task progress_task;
 
+static TaskFunc print_task_fn;
+static struct {
+  u8 stack[1024] __ALIGNED(8);
+  struct Task task;
+} print_tasks[8];
+
 static struct Notification progress_task_notify;
-
-static struct Task* video_phase_scheduler(struct Task* prev_task) {
-  if (likely(vga_control.next_scanline_requested)) {
-    return &render_task;
-  }
-  if (vga_control.entering_vblank) {
-    task_scheduler = vblank_phase_scheduler;
-    return NULL;
-  }
-  struct Task* next_task = task_standard_scheduler(prev_task);
-  if (next_task == NULL) {
-    WAIT_FOR_INTERRUPT();
-  }
-  return next_task;
-}
-
-static struct Task* vblank_phase_scheduler(struct Task* prev_task) {
-  if (vga_control.entering_frame) {
-    vga_control.entering_frame = false;
-    task_scheduler = video_phase_scheduler;
-    return NULL;
-  }
-  if (vga_control.entering_vblank) {
-    return &render_task;
-  }
-  struct Task* next_task = task_standard_scheduler(prev_task);
-  if (next_task == NULL) {
-    WAIT_FOR_INTERRUPT();
-  }
-  return next_task;
-}
 
 void prestart(void) {
   extern u32 _sdata, _edata, _sidata, _sbss, _ebss;
@@ -145,11 +117,6 @@ int main(void) {
   vga_apply_timings(&VGA_TIMINGS_640x480_57hz);
   vga_start();
 
-  // Wait a bit for the display to initialize
-  HAL_Delay(1500);
-
-  task_scheduler = &vblank_phase_scheduler;
-
   task_notify_init(&progress_task_notify);
 
   struct TaskParams render_task_params = {
@@ -173,6 +140,17 @@ int main(void) {
   };
   task_spawn(&progress_task, &progress_task_params);
 
+  // for (usize i = 0; i < SIZEOF(print_tasks); i++) {
+  //   struct TaskParams params = {
+  //     .stack_start = print_tasks[i].stack,
+  //     .stack_size = SIZEOF(print_tasks[i].stack),
+  //     .func = &print_task_fn,
+  //     .user_data = (void*)i,
+  //   };
+  //   task_spawn(&print_tasks[i].task, &params);
+  // }
+
+  vga_control.entering_vblank = true;
   task_start_scheduling();
   // video_player_demo();
   // terminal_demo();
@@ -180,13 +158,41 @@ int main(void) {
   // console_main_loop();
 }
 
+struct Task* scheduler(struct Task* prev_task) {
+  static bool in_video_phase = false;
+  while (true) {
+    if (likely(in_video_phase)) {
+      if (likely(vga_control.next_scanline_requested)) {
+        return &render_task;
+      }
+      if (vga_control.entering_vblank) {
+        in_video_phase = false;
+        return &render_task;
+      }
+    } else {
+      if (vga_control.entering_frame) {
+        vga_control.entering_frame = false;
+        in_video_phase = true;
+        return &render_task;
+      }
+      if (vga_control.entering_vblank) {
+        return &render_task;
+      }
+    }
+    struct Task* next_task = task_standard_scheduler(prev_task);
+    if (next_task != NULL) {
+      return next_task;
+    }
+    WAIT_FOR_INTERRUPT();
+  }
+}
+
 static FATFS SDFatFS;
 static FIL SDFile;
 static DIR SDDir;
 
-static void* test_task_fn(void* user_data) {
-  HAL_StatusTypeDef hal_status;
-  while ((hal_status = BSP_SD_Init()) != HAL_OK) {
+static void test_task_fn(__UNUSED void* user_data) {
+  while (BSP_SD_Init() != HAL_OK) {
     printf(".");
     task_sleep(1000);
   }
@@ -194,21 +200,22 @@ static void* test_task_fn(void* user_data) {
   console_clear_screen();
 
   check_fs_error(f_mount(&SDFatFS, "", 1));
+
+again:
   check_fs_error(f_open(&SDFile, "bebop_palette.bin", FA_READ));
 
   printf("loading %lu\n", f_size(&SDFile));
   task_yield();
 
   usize total_bytes = 0;
-  usize buf_size = BLOCKSIZE * 16;
-  char* buf = malloc(buf_size);
-  u32 start_cycles = DWT->CYCCNT;
+  static char buf[BLOCKSIZE * 16];
+  Instant start_time = systime_now();
 
   while (true) {
     task_yield();
     task_notify(&progress_task_notify);
     usize bytes_read = 0;
-    if (f_read(&SDFile, buf, buf_size, &bytes_read) != FR_OK) {
+    if (f_read(&SDFile, buf, sizeof(buf), &bytes_read) != FR_OK) {
       break;
     }
     if (bytes_read == 0) {
@@ -219,39 +226,51 @@ static void* test_task_fn(void* user_data) {
   task_notify(&progress_task_notify);
   task_yield();
 
-  u32 end_cycles = DWT->CYCCNT;
-  free(buf);
+  Instant end_time = systime_now();
   printf("\n");
 
-  float elapsed_seconds = (float)(end_cycles - start_cycles) / SystemCoreClock;
-  printf("%" PRIuPTR " %" PRIu32 "\n", total_bytes, end_cycles - start_cycles);
+  float elapsed_seconds = (float)(u32)(end_time - start_time) / 1000.0f;
+  printf("%" PRIuPTR " %" PRIu32 "\n", total_bytes, (u32)(end_time - start_time));
   printf("%f B/sec\n", total_bytes / elapsed_seconds);
   printf("%f kB/sec\n", (total_bytes / 1024.0f) / elapsed_seconds);
   printf("%f MB/sec\n", (total_bytes / 1024.0f / 1024.0f) / elapsed_seconds);
 
+  task_sleep(2000);
+  f_close(&SDFile);
+  goto again;
+
   while (true) {
     task_yield();
   }
-
-  return user_data;
 }
 
-static void* progress_task_fn(void* user_data) {
-  task_wait(&progress_task_notify);
-  u32 start_time = systime_now();
+static void progress_task_fn(__UNUSED void* user_data) {
+  task_wait(&progress_task_notify, NO_DEADLINE);
+  Instant start_time = systime_now();
   while (true) {
-    task_wait(&progress_task_notify);
+    task_wait(&progress_task_notify, NO_DEADLINE);
     console_clear_cursor_line();
     u32 percent = f_tell(&SDFile) * 100 / f_size(&SDFile);
     printf("\r%" PRIu32 "%% %" PRIu32, percent, (u32)(systime_now() - start_time));
     task_sleep(100);
   }
-  return user_data;
 }
 
-static void* render_task_fn(void* user_data) {
+static void print_task_fn(__UNUSED void* user_data) {
+  u32 task_idx = (u32)user_data;
+  u32 counter = 0;
   while (true) {
-    task_wait(&vga_notification);
+    console_set_cursor_line(task_idx);
+    console_clear_cursor_line();
+    printf("%" PRIu32 " %" PRIu32 "\n", task_idx, counter);
+    counter += 1;
+    task_sleep(task_idx + 1);
+  }
+}
+
+static void render_task_fn(__UNUSED void* user_data) {
+  while (true) {
+    task_wait(&vga_notification, NO_DEADLINE);
     if (vga_control.next_scanline_requested) {
       vga_control.next_scanline_requested = false;
       console_render_scanline(vga_control.next_scanline_nr);
@@ -261,12 +280,10 @@ static void* render_task_fn(void* user_data) {
       console_setup_frame_config();
     }
   }
-  return user_data;
 }
 
 static __NO_RETURN void terminal_demo(void) {
-  HAL_StatusTypeDef hal_status;
-  while ((hal_status = BSP_SD_Init()) != HAL_OK) {
+  while (BSP_SD_Init() != HAL_OK) {
     HAL_Delay(500);
   }
 
@@ -335,8 +352,7 @@ static __NO_RETURN void terminal_demo(void) {
 }
 
 static __NO_RETURN void video_player_demo(void) {
-  HAL_StatusTypeDef hal_status;
-  while ((hal_status = BSP_SD_Init()) != HAL_OK) {
+  while (BSP_SD_Init() != HAL_OK) {
     HAL_Delay(500);
   }
 
@@ -502,7 +518,7 @@ static __NO_RETURN void video_player_demo(void) {
       struct PixelDmaBuffer* backbuf = swap_pixel_dma_buffers();
       vga_set_next_scanline(backbuf->data);
 
-      vga_fast_memset(backbuf->data, 0, FRAME_WIDTH - 1);
+      vga_fast_memset(backbuf->data, 0, FRAME_WIDTH);
       backbuf->data[0] = backbuf->data[FRAME_WIDTH - 1] = VGA_PIXEL_ALL_PINS_RESET;
 
       u32 video_y = vga_line / PIXEL_SCALE - (FRAME_HEIGHT - video_height) / 2;
@@ -517,9 +533,7 @@ static __NO_RETURN void video_player_demo(void) {
           pixel_idx += repeats;
         }
         ASSERT(pixel_idx <= FRAME_WIDTH);
-        if (pixel_idx < FRAME_WIDTH) {
-          backbuf->data[pixel_idx] = VGA_PIXEL_ALL_PINS_RESET;
-        }
+        backbuf->data[MIN(pixel_idx, FRAME_WIDTH - 1)] = VGA_PIXEL_ALL_PINS_RESET;
       }
     }
 
@@ -528,8 +542,7 @@ static __NO_RETURN void video_player_demo(void) {
 }
 
 static __NO_RETURN void image_viewer_demo(void) {
-  HAL_StatusTypeDef hal_status;
-  while ((hal_status = BSP_SD_Init()) != HAL_OK) {
+  while (BSP_SD_Init() != HAL_OK) {
     HAL_Delay(500);
   }
 
@@ -627,6 +640,8 @@ static __NO_RETURN void image_viewer_demo(void) {
 void HAL_MspInit(void) {
   __HAL_RCC_SYSCFG_CLK_ENABLE();
   __HAL_RCC_PWR_CLK_ENABLE();
+  HAL_NVIC_SetPriority(SVCall_IRQn, 15, 0);
+  HAL_NVIC_SetPriority(PendSV_IRQn, 15, 0);
 }
 
 void SystemClock_Config(void) {

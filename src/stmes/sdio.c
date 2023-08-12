@@ -17,6 +17,7 @@
 
 #include "stmes/sdio.h"
 #include "stmes/gpio.h"
+#include "stmes/interrupts.h"
 #include "stmes/kernel/crash.h"
 #include "stmes/kernel/task.h"
 #include "stmes/kernel/time.h"
@@ -302,7 +303,7 @@ sdio_send_command_impl(SDIO_TypeDef* SDIOx, u32 arg, u8 cmd, enum SdioResponseFo
 
   // The stop transfer command (CMD12) is sometimes sent inside interrupts,
   // yielding in that context is wildly unsafe.
-  bool should_yield = !in_interrupt_handler();
+  // bool should_yield = !in_interrupt_handler();
   u32 start_time = hwtimer_read();
   u32 sdio_sta;
   while (true) {
@@ -311,7 +312,7 @@ sdio_send_command_impl(SDIO_TypeDef* SDIOx, u32 arg, u8 cmd, enum SdioResponseFo
     // flags have been set.
     if (!(sdio_sta & SDIO_FLAG_CMDACT) && (sdio_sta & completion_flags)) break;
     if (hwtimer_read() - start_time >= timeout) return SDMMC_ERROR_TIMEOUT;
-    if (should_yield) task_yield();
+    // if (should_yield) task_yield();
   }
   // This clears all kinds of completion flags:
   __SDIO_CLEAR_FLAG(SDIOx, SDIO_STATIC_CMD_FLAGS);

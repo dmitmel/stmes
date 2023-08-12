@@ -464,11 +464,11 @@ void vga_apply_timings(const struct VgaTimings* ts) {
   if (apb1_freq / apb1_pixel_prescaler != ts->pixel_clock_freq) {
     u32 pixel_clk_freq = apb1_freq / apb1_pixel_prescaler;
     float pixel_freq_ratio = (float)pixel_clk_freq / (float)ts->pixel_clock_freq;
-    hsync_width = roundf(hsync_width * pixel_freq_ratio);
-    active_width = roundf(active_width * pixel_freq_ratio);
-    horz_back_porch = roundf(horz_back_porch * pixel_freq_ratio);
-    horz_front_porch = roundf(horz_front_porch * pixel_freq_ratio);
-    whole_line = roundf(whole_line * pixel_freq_ratio);
+    hsync_width = (u32)roundf(hsync_width * pixel_freq_ratio);
+    active_width = (u32)roundf(active_width * pixel_freq_ratio);
+    horz_back_porch = (u32)roundf(horz_back_porch * pixel_freq_ratio);
+    horz_front_porch = (u32)roundf(horz_front_porch * pixel_freq_ratio);
+    whole_line = (u32)roundf(whole_line * pixel_freq_ratio);
   }
 
   LL_TIM_DisableIT_CC1(vsync_tim);
@@ -667,6 +667,8 @@ __STATIC_FORCEINLINE const VgaPixel* vga_fetch_next_scanline(u32 next_line_nr) {
   if (unlikely(requested_line_nr > state->frame_last_line)) return scanline;
   control->next_scanline_nr = requested_line_nr - state->frame_first_line;
   control->next_scanline_requested = true;
+  task_notify(&vga_notification);
+  task_yield_from_isr();
   return scanline;
 }
 
@@ -734,7 +736,6 @@ void TIM2_IRQHandler(void) {
   if (LL_TIM_IsActiveFlag_CC2(timer)) {
     LL_TIM_ClearFlag_CC2(timer);
     vga_on_line_end_reached();
-    task_notify(&vga_notification);
   }
 }
 
@@ -745,6 +746,7 @@ void TIM1_BRK_TIM9_IRQHandler(void) {
     u32 line_nr = vga_on_line_start();
     LL_TIM_OC_SetCompareCH1(timer, line_nr);
     task_notify(&vga_notification);
+    task_yield_from_isr();
   }
 }
 

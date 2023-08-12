@@ -42,6 +42,11 @@ void console_set_char(u8 line, u8 col, char c) {
   self->text_attrs[line][col] = self->current_text_attrs;
 }
 
+void console_set_cursor_line(u8 line) {
+  struct ConsoleBuffer* self = &console_buffer;
+  self->cursor_line = (self->top_line + line) % CONSOLE_LINES;
+}
+
 void console_clear_line(u8 line) {
   struct ConsoleBuffer* self = &console_buffer;
   u8 attr = self->current_text_attrs;

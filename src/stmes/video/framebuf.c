@@ -17,7 +17,7 @@ void pixel_dma_buf_reset(struct PixelDmaBuffer* buf) {
     u32 non_zeroes = buf->non_zeroes[i];
     buf->non_zeroes[i] = 0;
     if (non_zeroes & 1) {
-      non_zeroes &= ~1;
+      non_zeroes &= ~BIT(0);
       *pixel_ptr = 0;
     }
     pixel_ptr += 30;

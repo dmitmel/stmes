@@ -45,7 +45,8 @@ if "compiledb" not in COMMAND_LINE_TARGETS and not env.IsIntegrationDump():
       # These are not enabled by -Og
       "-fif-conversion",  # Convert ifs into branchless equivalents
       "-fif-conversion2",  # Convert ifs into instructions with condition flags
-    ]
+      "-fmove-loop-invariants",  # Moves and reuses common loads out of if blocks and loops
+    ],
   )
 
 

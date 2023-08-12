@@ -127,6 +127,7 @@ static struct CrashContext {
 // stored LR will at least reflect the PC at the caller's location.
 __NAKED void crash_collect_registers(void) {
   __ASM volatile(
+    // TODO: movw/movt
     "push {lr}\n\t"           // Save the LR because we are going to use it to store the address
     "ldr lr, =%0\n\t"         // of cpu_registers. The calling convention permits the use of LR as
                               // a general-purpose register, which we want because we are now left
@@ -186,6 +187,7 @@ static u32 hardfault_handler_impl(u32 exc_return, u32 msp, u32 psp);
 // <https://stackoverflow.com/questions/75699618/cortex-m4-svc-code-appears-to-always-pass-in-255-for-the-svc-number>
 static __NAKED void hardfault_handler_entry(void) {
   __ASM volatile(
+    // TODO: movw/movt
     "cpsid i\n\t"            // __disable_irq()
     "push {lr}\n\t"          // I don't think we should really be ascetic with the stack because
                              // the MPU is turned off in fault handlers, so we won't get a stack

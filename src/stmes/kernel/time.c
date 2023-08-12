@@ -66,6 +66,7 @@ __STATIC_FORCEINLINE u32 __hwtimer_read(void) {
   return LL_TIM_GetCounter(TIM5) / HWTIMER_PRESCALER;
 }
 
+// TODO: change to ticks
 u32 hwtimer_read(void) {
   return __hwtimer_read();
 }
@@ -78,7 +79,7 @@ void TIM5_IRQHandler(void) {
   TIM_TypeDef* hwtimer = TIM5;
   if (likely(LL_TIM_IsActiveFlag_CC1(hwtimer))) {
     LL_TIM_ClearFlag_CC1(hwtimer);
-    task_process_timers();
+    task_yield_from_isr();
   }
 }
 

@@ -7,6 +7,7 @@ extern u32 _estack;
 
 __NAKED void Reset_Handler(void) {
   // Load the initial stack pointer. C functions can be called after this.
+  // TODO: movw/movt
   __ASM volatile("ldr sp, =%0" ::"i"(&_estack));
   __ASM volatile("bl %0" ::"i"(&prestart));
   __ASM volatile("bl %0" ::"i"(&main));

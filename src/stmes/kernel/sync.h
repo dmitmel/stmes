@@ -7,6 +7,8 @@
 extern "C" {
 #endif
 
+// TODO: deadlines
+
 struct Mutex {
   volatile u8 locked;
   struct Notification notify;

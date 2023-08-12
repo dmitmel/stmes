@@ -19,6 +19,7 @@ extern "C" {
 u8 console_get_current_color(void);
 void console_set_color(u8 color);
 void console_set_char(u8 line, u8 col, char c);
+void console_set_cursor_line(u8 line);
 void console_clear_line(u8 line);
 void console_clear_cursor_line(void);
 void console_clear_screen(void);
