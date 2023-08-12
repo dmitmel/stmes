@@ -12,6 +12,7 @@
 #include "stmes/video/framebuf.h"
 #include "stmes/video/vga.h"
 #include <ff.h>
+#include <math.h>
 #include <printf.h>
 #include <stdlib.h>
 #include <stm32f4xx_hal.h>
@@ -45,6 +46,7 @@ static __NO_RETURN void video_player_demo(void);
 static __NO_RETURN void image_viewer_demo(void);
 
 static TaskFunc render_task_fn;
+static TaskFunc mandelbrot_render_task_fn;
 static u8 render_task_stack[1024] __ALIGNED(8);
 static struct Task render_task;
 
@@ -56,6 +58,10 @@ static TaskFunc progress_task_fn;
 static u8 progress_task_stack[1024] __ALIGNED(8);
 static struct Task progress_task;
 
+static TaskFunc mandelbrot_task_fn;
+static u8 mandelbrot_task_stack[1024] __ALIGNED(8);
+static struct Task mandelbrot_task;
+
 static TaskFunc print_task_fn;
 static struct {
   u8 stack[1024] __ALIGNED(8);
@@ -63,6 +69,9 @@ static struct {
 } print_tasks[8];
 
 static struct Notification progress_task_notify;
+
+static u8 mandelbrot_framebuf[FRAME_HEIGHT][FRAME_WIDTH];
+static VgaPixel mandelbrot_palette[1 << 8];
 
 void prestart(void) {
   extern u32 _sdata, _edata, _sidata, _sbss, _ebss;
@@ -122,23 +131,31 @@ int main(void) {
   struct TaskParams render_task_params = {
     .stack_start = render_task_stack,
     .stack_size = sizeof(render_task_stack),
-    .func = &render_task_fn,
+    // .func = &render_task_fn,
+    .func = &mandelbrot_render_task_fn,
   };
   task_spawn(&render_task, &render_task_params);
 
-  struct TaskParams test_task_params = {
-    .stack_start = test_task_stack,
-    .stack_size = sizeof(test_task_stack),
-    .func = &test_task_fn,
+  struct TaskParams mandelbrot_task_params = {
+    .stack_start = mandelbrot_task_stack,
+    .stack_size = sizeof(mandelbrot_task_stack),
+    .func = &mandelbrot_task_fn,
   };
-  task_spawn(&test_task, &test_task_params);
+  task_spawn(&mandelbrot_task, &mandelbrot_task_params);
 
-  struct TaskParams progress_task_params = {
-    .stack_start = progress_task_stack,
-    .stack_size = sizeof(progress_task_stack),
-    .func = &progress_task_fn,
-  };
-  task_spawn(&progress_task, &progress_task_params);
+  // struct TaskParams test_task_params = {
+  //   .stack_start = test_task_stack,
+  //   .stack_size = sizeof(test_task_stack),
+  //   .func = &test_task_fn,
+  // };
+  // task_spawn(&test_task, &test_task_params);
+
+  // struct TaskParams progress_task_params = {
+  //   .stack_start = progress_task_stack,
+  //   .stack_size = sizeof(progress_task_stack),
+  //   .func = &progress_task_fn,
+  // };
+  // task_spawn(&progress_task, &progress_task_params);
 
   // for (usize i = 0; i < SIZEOF(print_tasks); i++) {
   //   struct TaskParams params = {
@@ -278,6 +295,167 @@ static void render_task_fn(__UNUSED void* user_data) {
     if (vga_control.entering_vblank) {
       vga_control.entering_vblank = false;
       console_setup_frame_config();
+    }
+  }
+}
+
+static u32 hsv2rgb(float hsv[3]) {
+  float h = hsv[0], s = hsv[1], v = hsv[2];
+  float r = 0, g = 0, b = 0;
+  if (s == 0) {
+    r = v;
+    g = v;
+    b = v;
+  } else {
+    int i = (int)truncf(h * 6);
+    float f = h * 6 - i;
+    float p = v * (1 - s);
+    float q = v * (1 - (s * f));
+    float t = v * (1 - (s * (1 - f)));
+    switch (i % 6) {
+      case 0: r = v, g = t, b = p; break;
+      case 1: r = q, g = v, b = p; break;
+      case 2: r = p, g = v, b = t; break;
+      case 3: r = p, g = q, b = v; break;
+      case 4: r = t, g = p, b = v; break;
+      case 5: r = v, g = p, b = q; break;
+    }
+  }
+  return ((u32)(r * 0xFF) << 16) | ((u32)(g * 0xFF) << 8) | ((u32)(b * 0xFF) << 0);
+}
+
+__STATIC_INLINE float lerpf(float a, float b, float t) {
+  // <https://fgiesen.wordpress.com/2012/08/15/linear-interpolation-past-present-and-future/>
+  // Complies down to just two instructions: vfms + vfma.
+  return fmaf(t, b, fmaf(-t, a, a));
+}
+
+__STATIC_INLINE float mapf(float x, float a_start, float a_end, float b_start, float b_end) {
+  return (x - a_start) / (a_end - a_start) * (b_end - b_start) + b_start;
+}
+
+__STATIC_INLINE float clampf(float x, float min, float max) {
+  return fmaxf(min, fminf(max, x));
+}
+
+static u32 lerp_rgb(u32 color1, u32 color2, float t) {
+  u8 r = (u8)lerpf((u8)(color1 >> 16), (u8)(color2 >> 16), t);
+  u8 g = (u8)lerpf((u8)(color1 >> 8), (u8)(color2 >> 8), t);
+  u8 b = (u8)lerpf((u8)(color1 >> 0), (u8)(color2 >> 0), t);
+  return (r << 16) | (g << 8) | (b << 0);
+}
+
+static void mandelbrot_task_fn(__UNUSED void* user_data) {
+  task_sleep(3000);
+
+  for (u32 y = 0; y < FRAME_HEIGHT; y++) {
+    fast_memset_u8(mandelbrot_framebuf[y], UINT8_MAX, FRAME_WIDTH);
+  }
+
+  for (usize i = 0; i < SIZEOF(mandelbrot_palette); i++) {
+    float x = (float)i / (int)(SIZEOF(mandelbrot_palette) - 1);
+    float hsv[3] = {
+      mapf(x, 0, 1, 2.0f / 3.0f, 0),
+      1,
+      clampf(mapf(x, 0, 1, 0.2f, 2.0f), 0, 1),
+    };
+    mandelbrot_palette[i] = rgb12_to_vga_pins(rgb24_to_rgb12(hsv2rgb(hsv)));
+  }
+  mandelbrot_palette[UINT8_MAX] = rgb12_to_vga_pins(0x000);
+
+  while (true) {
+    float inv_width = 1.0f / (int)FRAME_WIDTH;
+    float inv_height = 1.0f / (int)FRAME_HEIGHT;
+    for (u32 py = 0; py < FRAME_HEIGHT; py++) {
+      for (u32 px = 0; px < FRAME_WIDTH; px++) {
+        const float RADIUS = 2;
+        const u32 MAX_ITERATIONS = 200;
+        const float EPSILON = 1e-3f;
+        const u32 MAX_PERIOD = 20;
+
+        float cx = mapf((float)(px + 0.5f) * inv_width, 0, 1, -2.5f, 1.0f);
+        float cy = mapf((float)(py + 0.5f) * inv_height, 0, 1, -1.25f, 1.25f);
+        float zx = 0, zy = 0;
+
+        float period_x = 0, period_y = 0;
+        u32 period = 0;
+
+        u32 iter = 0;
+        while (zx * zx + zy * zy < RADIUS * RADIUS && iter < MAX_ITERATIONS) {
+          float x = zx * zx - zy * zy + cx, y = 2 * zx * zy + cy;
+          zx = x, zy = y;
+          iter += 1;
+
+          if (fabsf(period_x - x) < EPSILON && fabsf(period_y - y) < EPSILON) {
+            iter = MAX_ITERATIONS;
+            break;
+          }
+          period++;
+          if (period > MAX_PERIOD) {
+            period = 0, period_x = x, period_y = y;
+          }
+        }
+
+        u8* pixel = &mandelbrot_framebuf[py][px];
+        if (iter >= MAX_ITERATIONS) {
+          *pixel = UINT8_MAX;
+          continue;
+        }
+
+        float nu = log2f(log2f(zx * zx + zy * zy) / 2); /* == log2f(log2f(sqrtf(...))) */
+        float smooth = iter + 1 - nu;
+        smooth = (1 - cosf(smooth / (float)MAX_ITERATIONS * 10.0f * (float)M_PI)) / 2;
+        *pixel = (u8)roundf(smooth * UINT8_MAX);
+
+        // smooth = (1 - cosf(smooth / (float)MAX_ITERATIONS * 10.0f * (float)M_PI)) / 2;
+        // float iter_trunc;
+        // float iter_fract = modff(smooth * MAX_ITERATIONS, &iter_trunc);
+        // iter = (u32)iter_trunc;
+        // iter = MIN(iter, SIZEOF(palette) - 1);
+        // // ASSERT((u32)iter_trunc + 1 < SIZEOF(palette));
+        // u32 rgb24 = lerp_rgb(palette[(u32)iter_trunc], palette[(u32)iter_trunc + 1], iter_fract);
+        // *pixel = rgb12_to_vga_pins(rgb24_to_rgb12(rgb24));
+      }
+    }
+
+    task_sleep(10);
+  }
+}
+
+static void mandelbrot_render_task_fn(__UNUSED void* user_data) {
+  while (true) {
+    task_wait(&vga_notification, NO_DEADLINE);
+    if (vga_control.next_scanline_requested) {
+      u16 vga_line = vga_control.next_scanline_nr;
+      vga_control.next_scanline_requested = false;
+      u16 y = vga_line / PIXEL_SCALE;
+      // ASSERT(video_y < MANDELBROT_FRAME_HEIGHT);
+      if (y < FRAME_HEIGHT) {
+        struct PixelDmaBuffer* backbuf = swap_pixel_dma_buffers();
+        vga_set_next_scanline(backbuf->data);
+        u8* row = mandelbrot_framebuf[y];
+        VgaPixel* pixel_ptr = &backbuf->data[0];
+        VgaPixel* palette = mandelbrot_palette;
+        for (u8* row_end = row + FRAME_WIDTH; row != row_end; row += 8, pixel_ptr += 8) {
+          u32 quad1 = ((u32*)row)[0], quad2 = ((u32*)row)[1];
+          u32 a = quad1 & 0xFF, b = (quad1 >> 8) & 0xFF, c = (quad1 >> 16) & 0xFF, d = quad1 >> 24;
+          u32 e = quad2 & 0xFF, f = (quad2 >> 8) & 0xFF, g = (quad2 >> 16) & 0xFF, h = quad2 >> 24;
+          a = palette[a], b = palette[b], c = palette[c], d = palette[d];
+          e = palette[e], f = palette[f], g = palette[g], h = palette[h];
+          pixel_ptr[0] = a, pixel_ptr[1] = b, pixel_ptr[2] = c, pixel_ptr[3] = d;
+          pixel_ptr[4] = e, pixel_ptr[5] = f, pixel_ptr[6] = g, pixel_ptr[7] = h;
+        }
+      }
+    }
+    if (vga_control.entering_vblank) {
+      vga_control.entering_vblank = 0;
+      struct VgaFrameConfig frame = {
+        .line_length = FRAME_WIDTH,
+        .lines_count = FRAME_HEIGHT * PIXEL_SCALE,
+        .pixel_scale = PIXEL_SCALE - 1,
+        .line_repeats = PIXEL_SCALE - 1,
+      };
+      vga_set_frame_config(&frame);
     }
   }
 }

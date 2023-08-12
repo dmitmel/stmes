@@ -1,3 +1,5 @@
+// TODO: Lock the state manipulation functions behind a mutex!
+
 #include "stmes/video/console.h"
 #include "stmes/utils.h"
 #include "stmes/video/console_font.h"

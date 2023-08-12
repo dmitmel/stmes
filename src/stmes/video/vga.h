@@ -63,7 +63,15 @@ __STATIC_FORCEINLINE void vga_set_next_scanline(const VgaPixel* scanline) {
 }
 
 __STATIC_FORCEINLINE void vga_set_frame_config(const struct VgaFrameConfig* cfg) {
-  vga_control.frame_config = *cfg;
+  volatile struct VgaFrameConfig* dst = &vga_control.frame_config;
+  // Copying these field-by-field generates better assembly than assigning an
+  // entire struct. Plus, apparently, in C++ you can't assign volatile structs.
+  dst->pixel_scale = cfg->pixel_scale;
+  dst->line_repeats = cfg->line_repeats;
+  dst->offset_left = cfg->offset_left;
+  dst->offset_top = cfg->offset_top;
+  dst->line_length = cfg->line_length;
+  dst->lines_count = cfg->lines_count;
   vga_control.frame_config_ready = true;
 }
 
@@ -90,6 +98,12 @@ __STATIC_FORCEINLINE VgaPixel rgb12_to_vga_pins(VgaPixel color) {
   pins |= (color & 0xE00) << 3; // color[11:9] -> pins[14:12]
   pins |= (pins ^ 0x77CF) << 16;
   return pins;
+}
+
+__STATIC_FORCEINLINE u32 rgb24_to_rgb12(u32 rgb) {
+  u8 r8 = rgb >> 16, g8 = rgb >> 8, b8 = rgb >> 0;
+  u8 r4 = r8 >> 4, g4 = g8 >> 4, b4 = b8 >> 4;
+  return (r4 << 8) | (g4 << 4) | (b4 << 0);
 }
 
 #ifdef __cplusplus
