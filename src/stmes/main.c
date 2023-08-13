@@ -440,41 +440,45 @@ static void mandelbrot_task_fn(__UNUSED void* user_data) {
       }
     }
 
-    task_sleep(1000);
+    task_sleep(1500);
 
     float next_camera_zoom = camera_zoom * (1 + logf(TARGET_ZOOM / camera_zoom) / ZOOM_SPEED);
     float next_camera_x = camera_x - TARGET_X * (1 / next_camera_zoom - 1 / camera_zoom);
     float next_camera_y = camera_y - TARGET_Y * (1 / next_camera_zoom - 1 / camera_zoom);
 
-    for (u32 i = 0; i < 4; i++) {
-      struct MandelbrotRect* rect = &mandelbrot_rect;
-      if (i % 2 == 0) {
-        float viewport_x = screen_size_x / UNIT_SIZE / next_camera_zoom;
-        float viewport_y = screen_size_y / UNIT_SIZE / next_camera_zoom;
-        float x1 = next_camera_x - viewport_x / 2, y1 = next_camera_y - viewport_y / 2;
-        float x2 = next_camera_x + viewport_x / 2, y2 = next_camera_y + viewport_y / 2;
+    struct MandelbrotRect* rect = &mandelbrot_rect;
+    for (u32 i = 1, max = 5; i <= max; i++) {
+      float factor = i / (float)max;
+      float new_camera_zoom = logerpf(camera_zoom, next_camera_zoom, factor);
+      float new_camera_x = camera_x - TARGET_X * (1 / new_camera_zoom - 1 / camera_zoom);
+      float new_camera_y = camera_y - TARGET_Y * (1 / new_camera_zoom - 1 / camera_zoom);
 
-        i32 screen_x = (i32)((x1 - camera_x) * UNIT_SIZE * camera_zoom + screen_size_x / 2);
-        i32 screen_y = (i32)((y1 - camera_y) * UNIT_SIZE * camera_zoom + screen_size_y / 2);
-        i32 size_x = (i32)((x2 - x1) * UNIT_SIZE * camera_zoom);
-        i32 size_y = (i32)((y2 - y1) * UNIT_SIZE * camera_zoom);
+      float viewport_x = screen_size_x / UNIT_SIZE / new_camera_zoom;
+      float viewport_y = screen_size_y / UNIT_SIZE / new_camera_zoom;
+      float x1 = new_camera_x - viewport_x / 2, y1 = new_camera_y - viewport_y / 2;
+      float x2 = new_camera_x + viewport_x / 2, y2 = new_camera_y + viewport_y / 2;
 
-        bool render = (                                      //
-          0 <= screen_x && screen_x < FRAME_WIDTH &&         //
-          0 <= screen_y && screen_y < FRAME_HEIGHT &&        //
-          0 <= size_x && size_x + screen_x <= FRAME_WIDTH && //
-          0 <= size_y && size_y + screen_y <= FRAME_HEIGHT   //
-        );
-        if (render) {
-          rect->x = screen_x, rect->y = screen_y, rect->w = size_x, rect->h = size_y;
-        } else {
-          rect->x = rect->y = rect->w = rect->h = 0;
-        }
+      i32 screen_x = (i32)((x1 - camera_x) * UNIT_SIZE * camera_zoom + screen_size_x / 2);
+      i32 screen_y = (i32)((y1 - camera_y) * UNIT_SIZE * camera_zoom + screen_size_y / 2);
+      i32 size_x = (i32)((x2 - x1) * UNIT_SIZE * camera_zoom);
+      i32 size_y = (i32)((y2 - y1) * UNIT_SIZE * camera_zoom);
+
+      bool render = (                                      //
+        0 <= screen_x && screen_x < FRAME_WIDTH &&         //
+        0 <= screen_y && screen_y < FRAME_HEIGHT &&        //
+        0 <= size_x && size_x + screen_x <= FRAME_WIDTH && //
+        0 <= size_y && size_y + screen_y <= FRAME_HEIGHT   //
+      );
+      if (render) {
+        rect->x = screen_x, rect->y = screen_y, rect->w = size_x, rect->h = size_y;
       } else {
         rect->x = rect->y = rect->w = rect->h = 0;
       }
-      task_sleep(250);
+      task_sleep(200);
     }
+
+    task_sleep(500);
+    rect->x = rect->y = rect->w = rect->h = 0;
 
     camera_zoom = next_camera_zoom, camera_x = next_camera_x, camera_y = next_camera_y;
   }
