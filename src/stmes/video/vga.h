@@ -106,6 +106,14 @@ __STATIC_FORCEINLINE u32 rgb24_to_rgb12(u32 rgb) {
   return (r4 << 8) | (g4 << 4) | (b4 << 0);
 }
 
+__STATIC_FORCEINLINE u32 rgb12(u8 r, u8 g, u8 b) {
+  return ((r & 0xF) << 8) | ((g & 0xF) << 4) | ((b & 0xF) << 0);
+}
+
+__STATIC_FORCEINLINE u32 rgb24(u8 r, u8 g, u8 b) {
+  return ((r & 0xFF) << 16) | ((g & 0xFF) << 8) | ((b & 0xFF) << 0);
+}
+
 #ifdef __cplusplus
 }
 #endif
