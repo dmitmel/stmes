@@ -7,6 +7,8 @@
 #include "stmes/video/vga.h"
 #include <printf.h>
 
+// #define CONSOLE_DEBUG
+
 // Multiplying a byte by this constant will duplicate it across the byte lanes.
 #define SMEAR_8x4 0x01010101u
 
@@ -103,8 +105,10 @@ void console_print(const char* str) {
   }
 }
 
+#ifdef CONSOLE_DEBUG
 static u32 row_timings[FRAME_HEIGHT] = { 0 };
 static usize row_timings_count = 0;
+#endif
 
 void console_setup_frame_config(void) {
   struct VgaFrameConfig frame = {
@@ -118,7 +122,9 @@ void console_setup_frame_config(void) {
 
 // GCC_ATTRIBUTE(optimize("-Os"))
 void console_render_scanline(u16 vga_line) {
+#ifdef CONSOLE_DEBUG
   u32 start_time = DWT->CYCCNT;
+#endif
 
   usize y = vga_line / PIXEL_SCALE - (FRAME_HEIGHT - CONSOLE_FRAME_HEIGHT) / 2;
   if (y >= CONSOLE_FRAME_HEIGHT) return;
@@ -235,10 +241,12 @@ void console_render_scanline(u16 vga_line) {
     }
   }
 
+#ifdef CONSOLE_DEBUG
   u32 end_time = DWT->CYCCNT;
   if (row_timings_count < SIZEOF(row_timings)) {
     row_timings[row_timings_count++] = end_time - start_time;
   }
+#endif
 }
 
 void console_init(void) {
@@ -248,6 +256,7 @@ void console_init(void) {
   console_clear_screen();
 }
 
+#ifdef CONSOLE_DEBUG
 __NO_RETURN void console_main_loop(void) {
   while (true) {
     WAIT_FOR_INTERRUPT();
@@ -280,3 +289,4 @@ __NO_RETURN void console_main_loop(void) {
     }
   }
 }
+#endif
