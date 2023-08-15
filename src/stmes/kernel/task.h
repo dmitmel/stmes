@@ -75,7 +75,7 @@ __STATIC_INLINE struct Task* get_current_task(void) {
 }
 
 struct Task* task_scheduler(struct Task* prev_task);
-__NO_RETURN void start_task_scheduler(void* intial_stack_pointer);
+void start_task_scheduler(void);
 void task_spawn(struct Task* task, const struct TaskParams* params);
 usize task_stack_high_watermark(struct Task* task);
 

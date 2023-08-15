@@ -47,7 +47,6 @@
 #include "stmes/kernel/task.h"
 #include "stmes/interrupts.h"
 #include "stmes/kernel/crash.h"
-#include "stmes/main.h"
 #include "stmes/utils.h"
 #include <stdlib.h>
 
@@ -271,24 +270,7 @@ static void syscall_handler_entry(usize arg1, usize arg2, usize arg3, enum Sysca
   }
 }
 
-static __NAKED void main_task_launcher(__UNUSED void* intial_msp) {
-  // The main() function is wrapped in a launcher function to conclude the
-  // early boot sequence, in particular reset the MSP to its initial value at
-  // boot because after entering the first task, all the Main Stack will be
-  // used for is processing interrupts, syscalls and running the scheduler. The
-  // frames allocated there prior to entering this function are now useless
-  // since normal execution will never return there, so that data may be
-  // cleared entirely to leave the entirety of the Main Stack to the discretion
-  // of interrupts.
-  __ASM volatile("msr msp, r0");
-  // And now the main() can be tail-called (this is the reason for writing this
-  // wrapper in assembly: to not waste any stack space before entering main()).
-  __ASM volatile("b %0" ::"i"(&main));
-}
-
-// This function is invoked during the early boot sequence on the Main Stack in
-// the Privileged mode.
-__NO_RETURN void start_task_scheduler(void* intial_stack_pointer) {
+void start_task_scheduler(void) {
   struct TaskSchedulerState* state = &scheduler_state;
   state->ready_queue_head = NULL;
   state->sleeping_queue_head = NULL;
@@ -299,17 +281,6 @@ __NO_RETURN void start_task_scheduler(void* intial_stack_pointer) {
   HAL_NVIC_SetPriority(PendSV_IRQn, 0xF, 0xF);
 
   __atomic_clear(&scheduler_state_lock, __ATOMIC_RELEASE);
-
-  struct TaskParams task_params = {
-    .stack_start = main_task_stack,
-    .stack_size = sizeof(main_task_stack),
-    .func = &main_task_launcher,
-    .user_data = intial_stack_pointer,
-  };
-  task_spawn(&main_task, &task_params);
-  // The above function will make a syscall which will cause a context switch
-  // to the newly created main task. Execution will *never* return here.
-  __builtin_unreachable();
 }
 
 // This function is the bottom-most frame of every task stack and exists
