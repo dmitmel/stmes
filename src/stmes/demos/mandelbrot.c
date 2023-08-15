@@ -70,8 +70,6 @@ static u32 lerp_rgb(u32 color1, u32 color2, float t) {
 }
 
 static void mandelbrot_task_fn(__UNUSED void* user_data) {
-  task_sleep(2000);
-
   for (u32 y = 0; y < FRAME_HEIGHT; y++) {
     fast_memset_u8(mandelbrot_framebuf[y], UINT8_MAX, FRAME_WIDTH);
   }
@@ -86,6 +84,8 @@ static void mandelbrot_task_fn(__UNUSED void* user_data) {
     mandelbrot_palette[i] = rgb12_to_vga_pins(rgb24_to_rgb12(hsv2rgb(hsv)));
   }
   mandelbrot_palette[UINT8_MAX] = rgb12_to_vga_pins(0x000);
+
+  task_sleep(2000);
 
   float camera_zoom = 1, camera_x = 0, camera_y = 0;
 
