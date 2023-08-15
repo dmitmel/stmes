@@ -205,7 +205,7 @@ static __NAKED void hardfault_handler_entry(void) {
     ".cfi_register lr,r0\n\t" // (this directive informs the debugger that LR's value is in r0)
 #endif                        //
     "bl %0\n\t"               // ...and we call the actual handler. We then use its return value
-    "bx r0\n\t" ::            // as EXC_RETURN, letting the handler alter it.
+    "bx r0" ::                // as EXC_RETURN, letting the handler alter it.
     "i"(&hardfault_handler_impl),
     "i"(&crash_context.cpu_registers)
   );

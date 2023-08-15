@@ -1,6 +1,7 @@
 #include "stmes/fatfs.h"
 #include "stmes/kernel/crash.h"
 #include "stmes/kernel/sync.h"
+#include "stmes/kernel/task.h"
 #include "stmes/sdio.h"
 #include "stmes/utils.h"
 #include <ff.h>
@@ -16,6 +17,7 @@ static u8 dma_scratch[BLOCKSIZE] __ALIGNED(4);
 
 static volatile DSTATUS sd_status = STA_NOINIT;
 static volatile bool sd_write_done = false, sd_read_done = false;
+// static struct Notification sd_notify;
 
 void* ff_memalloc(UINT msize) {
   return ff_malloc(msize);
@@ -58,13 +60,17 @@ static HAL_StatusTypeDef sd_wait_for_card_state(HAL_SD_CardStateTypedef state, u
 }
 
 static HAL_StatusTypeDef sd_wait_until_flag_set(volatile bool* flag, u32 timeout) {
+  // TODO: Using notifications instead of a busy loop is apparently slower. Investigate why.
+  // Instant deadline = systime_now() + timeout;
   u32 start_time = HAL_GetTick();
   do {
+    // task_wait(&sd_notify, deadline);
     if (*flag != false) {
       return HAL_OK;
     }
     // task_yield();
   } while (HAL_GetTick() - start_time < timeout);
+  // } while (systime_now() < deadline);
   return HAL_TIMEOUT;
 }
 
@@ -194,11 +200,13 @@ DWORD get_fattime(void) {
 void HAL_SD_TxCpltCallback(SD_HandleTypeDef* hsd) {
   UNUSED(hsd);
   sd_write_done = true;
+  // task_notify(&sd_notify);
 }
 
 void HAL_SD_RxCpltCallback(SD_HandleTypeDef* hsd) {
   UNUSED(hsd);
   sd_read_done = true;
+  // task_notify(&sd_notify);
 }
 
 void HAL_SD_AbortCallback(SD_HandleTypeDef* hsd) {

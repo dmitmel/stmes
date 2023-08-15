@@ -15,6 +15,6 @@ void mutex_lock(struct Mutex* self) {
 void mutex_unlock(struct Mutex* self) {
   __atomic_clear(&self->locked, __ATOMIC_RELEASE);
   if (task_notify(&self->notify)) {
-    task_yield();
+    yield();
   }
 }

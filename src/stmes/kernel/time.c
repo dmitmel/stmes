@@ -79,7 +79,7 @@ void TIM5_IRQHandler(void) {
   TIM_TypeDef* hwtimer = TIM5;
   if (likely(LL_TIM_IsActiveFlag_CC1(hwtimer))) {
     LL_TIM_ClearFlag_CC1(hwtimer);
-    task_yield_from_isr();
+    yield_from_isr();
   }
 }
 
@@ -93,6 +93,7 @@ Instant systime_now(void) {
     u32 hwtime = __hwtimer_read();
     // Check if the timer has overflown before calling this function or while
     // we were reading the counter values in the previous two lines.
+    // TODO: Can this be safely down without establishing a critical section?
     if (unlikely(LL_TIM_IsActiveFlag_UPDATE(hwtimer))) {
       LL_TIM_ClearFlag_UPDATE(hwtimer);
       // TODO: Do something about overflows!

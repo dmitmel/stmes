@@ -11,13 +11,9 @@ void crash_collect_registers(void);
 
 __NO_RETURN void crash(const char* message, const char* src_file, u32 src_line);
 
-#define ASSERT(expr)                                 \
-  do {                                               \
-    if (unlikely(!(expr))) {                         \
-      crash_collect_registers();                     \
-      crash("Assertion failed", __FILE__, __LINE__); \
-    }                                                \
-  } while (0)
+#define CRASH(message) (crash_collect_registers(), crash((message), __FILE__, __LINE__))
+
+#define ASSERT(expr) (unlikely(!(expr)) ? CRASH("Assertion failed") : (void)0)
 
 __NO_RETURN void crash_on_hal_error(HAL_StatusTypeDef code, const char* file, u32 line);
 

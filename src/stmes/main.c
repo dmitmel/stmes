@@ -45,6 +45,9 @@ static __NO_RETURN void terminal_demo(void);
 static __NO_RETURN void video_player_demo(void);
 static __NO_RETURN void image_viewer_demo(void);
 
+struct Task main_task;
+u8 main_task_stack[1024] __ALIGNED(8);
+
 static TaskFunc render_task_fn;
 static TaskFunc mandelbrot_render_task_fn;
 static u8 render_task_stack[1024] __ALIGNED(8);
@@ -107,8 +110,8 @@ void prestart(void) {
 #endif
 
   extern void __libc_init_array(void);
-  // Runs the initializers of static variables and functions marked with
-  // __attribute__((constructor)).
+  // Runs the initializers of static variables, constructors of C++ classes and
+  // functions marked with __attribute__((constructor)).
   __libc_init_array();
 }
 
@@ -134,31 +137,31 @@ int main(void) {
   struct TaskParams render_task_params = {
     .stack_start = render_task_stack,
     .stack_size = sizeof(render_task_stack),
-    // .func = &render_task_fn,
-    .func = &mandelbrot_render_task_fn,
+    .func = &render_task_fn,
+    // .func = &mandelbrot_render_task_fn,
   };
   task_spawn(&render_task, &render_task_params);
 
-  struct TaskParams mandelbrot_task_params = {
-    .stack_start = mandelbrot_task_stack,
-    .stack_size = sizeof(mandelbrot_task_stack),
-    .func = &mandelbrot_task_fn,
+  // struct TaskParams mandelbrot_task_params = {
+  //   .stack_start = mandelbrot_task_stack,
+  //   .stack_size = sizeof(mandelbrot_task_stack),
+  //   .func = &mandelbrot_task_fn,
+  // };
+  // task_spawn(&mandelbrot_task, &mandelbrot_task_params);
+
+  struct TaskParams test_task_params = {
+    .stack_start = test_task_stack,
+    .stack_size = sizeof(test_task_stack),
+    .func = &test_task_fn,
   };
-  task_spawn(&mandelbrot_task, &mandelbrot_task_params);
+  task_spawn(&test_task, &test_task_params);
 
-  // struct TaskParams test_task_params = {
-  //   .stack_start = test_task_stack,
-  //   .stack_size = sizeof(test_task_stack),
-  //   .func = &test_task_fn,
-  // };
-  // task_spawn(&test_task, &test_task_params);
-
-  // struct TaskParams progress_task_params = {
-  //   .stack_start = progress_task_stack,
-  //   .stack_size = sizeof(progress_task_stack),
-  //   .func = &progress_task_fn,
-  // };
-  // task_spawn(&progress_task, &progress_task_params);
+  struct TaskParams progress_task_params = {
+    .stack_start = progress_task_stack,
+    .stack_size = sizeof(progress_task_stack),
+    .func = &progress_task_fn,
+  };
+  task_spawn(&progress_task, &progress_task_params);
 
   // for (usize i = 0; i < SIZEOF(print_tasks); i++) {
   //   struct TaskParams params = {
@@ -170,41 +173,11 @@ int main(void) {
   //   task_spawn(&print_tasks[i].task, &params);
   // }
 
-  vga_control.entering_vblank = true;
-  task_start_scheduling();
+  // video_player_init();
   // video_player_demo();
   // terminal_demo();
   // image_viewer_demo();
   // console_main_loop();
-}
-
-struct Task* scheduler(struct Task* prev_task) {
-  static bool in_video_phase = false;
-  while (true) {
-    if (likely(in_video_phase)) {
-      if (likely(vga_control.next_scanline_requested)) {
-        return &render_task;
-      }
-      if (vga_control.entering_vblank) {
-        in_video_phase = false;
-        return &render_task;
-      }
-    } else {
-      if (vga_control.entering_frame) {
-        vga_control.entering_frame = false;
-        in_video_phase = true;
-        return &render_task;
-      }
-      if (vga_control.entering_vblank) {
-        return &render_task;
-      }
-    }
-    struct Task* next_task = task_standard_scheduler(prev_task);
-    if (next_task != NULL) {
-      return next_task;
-    }
-    WAIT_FOR_INTERRUPT();
-  }
 }
 
 static FATFS SDFatFS;
@@ -212,6 +185,11 @@ static FIL SDFile;
 static DIR SDDir;
 
 static void test_task_fn(__UNUSED void* user_data) {
+  // while (true) {
+  //   printf("%" PRIu64 "\n", systime_now());
+  //   task_sleep(1000);
+  // }
+
   while (BSP_SD_Init() != HAL_OK) {
     printf(".");
     task_sleep(1000);
@@ -225,15 +203,26 @@ again:
   check_fs_error(f_open(&SDFile, "bebop_palette.bin", FA_READ));
 
   printf("loading %lu\n", f_size(&SDFile));
-  task_yield();
+  yield();
 
   usize total_bytes = 0;
-  static char buf[BLOCKSIZE * 16];
+  static char buf[BLOCKSIZE * 8];
   Instant start_time = systime_now();
 
+  usize i = 0;
   while (true) {
-    task_yield();
     task_notify(&progress_task_notify);
+    // yield();
+
+    // u32 sectors = sizeof(buf) / BLOCKSIZE;
+    // disk_read(0, (BYTE*)buf, i, sectors);
+    // i += sectors;
+    // u32 bytes_read = BLOCKSIZE * sectors;
+    // if (total_bytes >= 1024 * 1024) {
+    //   break;
+    // }
+    // total_bytes += bytes_read;
+
     usize bytes_read = 0;
     if (f_read(&SDFile, buf, sizeof(buf), &bytes_read) != FR_OK) {
       break;
@@ -244,24 +233,20 @@ again:
     total_bytes += bytes_read;
   }
   task_notify(&progress_task_notify);
-  task_yield();
+  yield();
 
   Instant end_time = systime_now();
   printf("\n");
 
   float elapsed_seconds = (float)(u32)(end_time - start_time) / 1000.0f;
   printf("%" PRIuPTR " %" PRIu32 "\n", total_bytes, (u32)(end_time - start_time));
-  printf("%f B/sec\n", total_bytes / elapsed_seconds);
-  printf("%f kB/sec\n", (total_bytes / 1024.0f) / elapsed_seconds);
-  printf("%f MB/sec\n", (total_bytes / 1024.0f / 1024.0f) / elapsed_seconds);
+  printf("%f B/sec\n", (double)(total_bytes / elapsed_seconds));
+  printf("%f kB/sec\n", (double)((total_bytes / 1024.0f) / elapsed_seconds));
+  printf("%f MB/sec\n", (double)((total_bytes / 1024.0f / 1024.0f) / elapsed_seconds));
 
   task_sleep(2000);
   f_close(&SDFile);
   goto again;
-
-  while (true) {
-    task_yield();
-  }
 }
 
 static void progress_task_fn(__UNUSED void* user_data) {
@@ -891,8 +876,6 @@ static __NO_RETURN void image_viewer_demo(void) {
 void HAL_MspInit(void) {
   __HAL_RCC_SYSCFG_CLK_ENABLE();
   __HAL_RCC_PWR_CLK_ENABLE();
-  HAL_NVIC_SetPriority(SVCall_IRQn, 15, 0);
-  HAL_NVIC_SetPriority(PendSV_IRQn, 15, 0);
 }
 
 void SystemClock_Config(void) {

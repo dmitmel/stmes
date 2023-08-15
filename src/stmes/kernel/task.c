@@ -1,86 +1,346 @@
+// The central component of my improvised nanokernel - a preemptive task
+// scheduler with a round-robin scheduling policy. Implemented in a more or
+// less conventional manner of writing RTOSes for Cortex-M CPUs, it utilizes
+// the SVCall interrupt for making syscalls and the PendSV one for preemptively
+// entering the scheduler.
+//
+// Context switching is performed with the help of hardware: on exception entry
+// the CPU pushes a subset of registers onto the stack, which we complement by
+// saving the rest of the important state ourselves. The PendSV exception is
+// particularly helpful here: it fires only when there are no other pending
+// interrupts, so by being assigned the absolute lowest priority it can't
+// preempt any other ISR, which guarantees that manipulating the saved context
+// (in particular rewriting the stack pointer) is always safe and returning
+// from it will always resume the execution of a task. Other interrupt handlers
+// may set the ICSR.PENDSVSET bit to essentially request a deferred context
+// switch after the processing of the current interrupt.
+//
+// The SVCall interrupt is given the lowest possible priority out of related
+// concerns: for one, it must be at that same priority level as PendSV, so that
+// the "kernel" itself can't preempt itself (and break the fragile scheduling
+// logic). This also means that the kernel and the scheduler may be interrupted
+// by higher-priority IRQs, though they aren't supposed to touch the kernel
+// directly or make syscalls, so that is perfectly fine and results in lower
+// interrupt latency. As an additional point, in the current implementation
+// system calls always cause a context switch.
+//
+// Although the scheduler itself is currently rather primitive, it makes use of
+// doubly-linked circular lists as ready queues, which give excellent task
+// switching performance. Another significant optimization is the use of
+// bitmasks for waking up tasks with notifications - a single 32-bit mask can
+// essentially encode a list of 32 tasks, which greatly simplifies the structs
+// of synchronization primitives and makes them a lot more compact.
+
+// TODO: Task priorities and a multi-level feedback queue scheduler.
+
+// TODO: Yield hints. A couple of notes:
+// 1. They can be passed as a parameter to the yield syscall, but for yields
+//    triggered from ISRs through PendSV they need to be accumulated in an
+//    atomic variable (__atomic_fetch_or).
+// 2. Since syscalls always yield in my implementation, the syscall functions
+//    themselves should return a yield hint, e.g. the spawn syscall may want to
+//    request to yield to the newly created task.
+
+// TODO: Terminated tasks currently can't clear their own state, such as
+// freeing the stack if it was dynamically allocated.
+
 #include "stmes/kernel/task.h"
 #include "stmes/interrupts.h"
 #include "stmes/kernel/crash.h"
+#include "stmes/main.h"
 #include "stmes/utils.h"
 #include <stdlib.h>
 
 #define STACK_CHECK_VALUE 0x57ACCE4D // STACCEND or something
 
+struct Task* current_task;
+
 static struct TaskSchedulerState {
-  struct Task* current_task;
-  TasksMask alive_tasks_mask, sleeping_tasks_mask, woken_up_tasks_mask, new_timers_mask;
-  u32 pendsv_entry_time;
+  struct Task *ready_queue_head, *sleeping_queue_head;
+  TasksMask woken_up_tasks_mask; // must be updated atomically
   Instant next_closest_deadline;
-  struct Task* alive_tasks[MAX_ALIVE_TASKS];
 } scheduler_state;
 
-// The scheduler will be unlocked only when it has been started.
+// The scheduler will be unlocked only after it has been started.
 static volatile bool scheduler_state_lock = true;
 
-__STATIC_INLINE void acquire_scheduler_state(void) {
+// The kernel functions should lock the scheduler state before using it.
+__STATIC_INLINE struct TaskSchedulerState* acquire_scheduler_state(void) {
   bool was_locked = __atomic_test_and_set(&scheduler_state_lock, __ATOMIC_ACQUIRE);
   ASSERT(!was_locked);
+  return &scheduler_state;
 }
 
 __STATIC_INLINE void release_scheduler_state(void) {
   __atomic_clear(&scheduler_state_lock, __ATOMIC_RELEASE);
 }
 
-struct ExceptionStackedContext {
-  u32 r0, r1, r2, r3, r12, lr, pc, xpsr;
-};
-
-struct TaskStackedContext {
-  u32 control, r4, r5, r6, r7, r8, r9, r10, r11, exc_return;
-};
-
-__WEAK struct Task* scheduler(struct Task* prev_task) {
-  return prev_task;
+// Inserts a task at the head of the queue in O(1) time and returns the
+// updated queue head.
+__STATIC_INLINE struct Task* task_queue_insert(struct Task* head, struct Task* node) {
+  if (unlikely(head == NULL)) { // The list was empty
+    node->prev = node->next = node;
+    return node;
+  }
+  struct Task *next = head, *prev = head->prev;
+  node->next = next, node->prev = prev; // Link the node to the surrounding nodes
+  prev->next = next->prev = node;       // Link the node into the list
+  return node;
 }
 
-// TODO: Unsafe, the task may die while we are holding the pointer to it.
-struct Task* get_task_by_id(TaskId id) {
+// Removes a task from the queue in O(1) time (thanks to its doubly-linked
+// nature) and returns the updated head.
+__STATIC_INLINE struct Task* task_queue_remove(struct Task* head, struct Task* node) {
+  struct Task *prev = node->prev, *next = node->next;
+  if (unlikely(next == node)) { // This was the last node
+    return NULL;
+  }
+  prev->next = next, next->prev = prev;
+  return head == node ? next : head;
+}
+
+__STATIC_INLINE struct Task* task_queue_find_by_id(struct Task* head, TaskId id) {
+  if (head == NULL) return NULL;
+  struct Task* task = head;
+  do {
+    if (task->id == id) {
+      return task;
+    }
+    task = task->next;
+  } while (task != head);
+  return NULL;
+}
+
+// This function shouldn't be inlined: timers expire relatively rarely, and
+// since this function uses a lot of registers for local variables, inlining it
+// will make the main scheduler function push a ton of registers every time.
+static TasksMask process_task_timers(u64 now) {
   struct TaskSchedulerState* state = &scheduler_state;
-  ASSERT(id < SIZEOF(state->alive_tasks));
-  struct Task* task = state->alive_tasks[id];
-  ASSERT(task != NULL);
+  TasksMask wake_up_mask = 0;
+  struct Task* first_task = state->sleeping_queue_head;
+  if (unlikely(first_task == NULL)) return wake_up_mask;
+
+  u64 closest_deadline = NO_DEADLINE;
+  struct Task* task = first_task;
+  do {
+    Instant deadline = task->wait_deadline;
+    if (now >= deadline) {
+      // TODO: Idk, assembling a mask for the tasks with expired timers and
+      // waking them up through the common wakeup routine seems to work faster.
+      wake_up_mask |= BIT(task->id);
+    } else if (deadline < closest_deadline) {
+      closest_deadline = deadline;
+    }
+    task = task->next;
+  } while (task != first_task);
+
+  state->next_closest_deadline = closest_deadline;
+  // TODO: hwtimer_set_alarm(closest_deadline);
+  return wake_up_mask;
+}
+
+// This function shouldn't be inlined as well.
+static void wake_up_tasks(TasksMask mask) {
+  static struct TaskSchedulerState* state = &scheduler_state;
+  struct Task* first_task = state->sleeping_queue_head;
+  if (unlikely(first_task == NULL)) return;
+
+  struct Task* task = first_task;
+  while (true) {
+    struct Task* next_task = task->next;
+    bool is_last = next_task == first_task;
+
+    if (mask & BIT(task->id)) {
+      state->sleeping_queue_head = first_task =
+        task_queue_remove(state->sleeping_queue_head, task);
+      state->ready_queue_head = task_queue_insert(state->ready_queue_head, task);
+      // Exit if we have fully cleared out the sleeping queue.
+      if (first_task == NULL) break;
+    }
+
+    if (is_last) break;
+    task = next_task;
+  }
+}
+
+// NOTE: This function will be executed very frequently (at least on every VGA
+// scanline), performance is CRITICAL here!
+struct Task* task_scheduler(struct Task* prev_task) {
+  UNUSED(prev_task);
+  struct TaskSchedulerState* state = acquire_scheduler_state();
+
+  struct Task* task;
+  while (true) {
+    TasksMask wake_up_mask = __atomic_exchange_n(&state->woken_up_tasks_mask, 0, __ATOMIC_RELAXED);
+    Instant now = systime_now();
+    if (likely(now >= state->next_closest_deadline)) {
+      wake_up_mask |= process_task_timers(now);
+    }
+    if (likely(wake_up_mask != 0)) {
+      wake_up_tasks(wake_up_mask);
+    }
+
+    // Anyway, now that the ready queue has been constructed, scheduling is
+    // just a matter of pulling the next task and rotating the circular queue.
+    task = state->ready_queue_head;
+    if (likely(task != NULL)) {
+      state->ready_queue_head = task->next;
+      break;
+    } else {
+      // No task is ready, only an interrupt occuring can change the situation
+      // (e.g. by waking up a task waiting for I/O), wait until then.
+      // TODO: This creates a subtle race condition:
+      // <https://electronics.stackexchange.com/questions/12601/best-pattern-for-wfi-wait-for-interrupt-on-cortex-arm-microcontrolers>.
+      // I believe that using the sleep-on-exit mode of the CPU can solve this:
+      // if the scheduler decides to sleep, it sets SCR.SLEEPONEXIT and exits
+      // the interrupt. if another interrupt has preempted the scheduler in the
+      // meantime and deferred a PendSV, it will fire instead of the CPU going
+      // to sleep and reactive the scheduler.
+      __WFI();
+    }
+  }
+
+  release_scheduler_state();
   return task;
 }
 
-struct Task* get_current_task(void) {
-  return scheduler_state.current_task;
+static void syscall_sleep(void) {
+  struct TaskSchedulerState* state = acquire_scheduler_state();
+
+  struct Task* task = current_task;
+  state->ready_queue_head = task_queue_remove(state->ready_queue_head, task);
+  state->sleeping_queue_head = task_queue_insert(state->sleeping_queue_head, task);
+
+  // Checking all timers isn't required here, we only need to decrease the
+  // closest deadline if necessary.
+  Instant deadline = task->wait_deadline;
+  if (deadline < state->next_closest_deadline) {
+    state->next_closest_deadline = deadline;
+  }
+
+  release_scheduler_state();
+}
+
+static void syscall_spawn(struct Task* task) {
+  struct TaskSchedulerState* state = acquire_scheduler_state();
+
+  // This is O(n^2), but who cares, we won't be spawning lots of tasks anyway.
+  for (TaskId free_id = 0; free_id < MAX_ALIVE_TASKS && free_id != DEAD_TASK_ID; free_id++) {
+    if (task_queue_find_by_id(state->ready_queue_head, free_id) != NULL) {
+      continue;
+    }
+    if (task_queue_find_by_id(state->sleeping_queue_head, free_id) != NULL) {
+      continue;
+    }
+    task->id = free_id;
+    break;
+  }
+  ASSERT(task->id != DEAD_TASK_ID);
+
+  state->ready_queue_head = task_queue_insert(state->ready_queue_head, task);
+
+  release_scheduler_state();
+}
+
+static void syscall_exit(void) {
+  struct TaskSchedulerState* state = acquire_scheduler_state();
+
+  struct Task* task = current_task;
+  state->ready_queue_head = task_queue_remove(state->ready_queue_head, task);
+  task->id = DEAD_TASK_ID;
+  // Tell the context switcher not to save any state, we won't be returning to
+  // this task anyway. TODO: Or not? Is inspecting the task's registers after
+  // it has died useful in any way? Perhaps we should have a reaper task?
+  current_task = NULL;
+
+  release_scheduler_state();
+}
+
+static void syscall_handler_entry(usize arg1, usize arg2, usize arg3, enum Syscall syscall_nr) {
+  UNUSED(arg2), UNUSED(arg3);
+  // This compiles to a jump table.
+  switch (syscall_nr) {
+    case SYSCALL_YIELD:
+      // The context switcher will be entered immediately after return, so the
+      // yield syscall essentially "does nothing".
+      return;
+    case SYSCALL_SLEEP: syscall_sleep(); return;
+    case SYSCALL_SPAWN: syscall_spawn((struct Task*)arg1); return;
+    case SYSCALL_EXIT: syscall_exit(); return;
+    default: CRASH("Unknown syscall");
+  }
+}
+
+static __NAKED void main_task_launcher(__UNUSED void* intial_msp) {
+  // The main() function is wrapped in a launcher function to conclude the
+  // early boot sequence, in particular reset the MSP to its initial value at
+  // boot because after entering the first task, all the Main Stack will be
+  // used for is processing interrupts, syscalls and running the scheduler. The
+  // frames allocated there prior to entering this function are now useless
+  // since normal execution will never return there, so that data may be
+  // cleared entirely to leave the entirety of the Main Stack to the discretion
+  // of interrupts.
+  __ASM volatile("msr msp, r0");
+  // And now the main() can be tail-called (this is the reason for writing this
+  // wrapper in assembly: to not waste any stack space before entering main()).
+  __ASM volatile("b %0" ::"i"(&main));
+}
+
+// This function is invoked during the early boot sequence on the Main Stack in
+// the Privileged mode.
+__NO_RETURN void start_task_scheduler(void* intial_stack_pointer) {
+  struct TaskSchedulerState* state = &scheduler_state;
+  state->ready_queue_head = NULL;
+  state->sleeping_queue_head = NULL;
+  state->woken_up_tasks_mask = 0;
+  state->next_closest_deadline = NO_DEADLINE;
+
+  HAL_NVIC_SetPriority(SVCall_IRQn, 0xF, 0xF);
+  HAL_NVIC_SetPriority(PendSV_IRQn, 0xF, 0xF);
+
+  __atomic_clear(&scheduler_state_lock, __ATOMIC_RELEASE);
+
+  struct TaskParams task_params = {
+    .stack_start = main_task_stack,
+    .stack_size = sizeof(main_task_stack),
+    .func = &main_task_launcher,
+    .user_data = intial_stack_pointer,
+  };
+  task_spawn(&main_task, &task_params);
+  // The above function will make a syscall which will cause a context switch
+  // to the newly created main task. Execution will *never* return here.
+  __builtin_unreachable();
 }
 
 // This function is the bottom-most frame of every task stack and exists
-// largely be a barrier for stack trace unwinding by the debugger (by being
-// implemented in assembly and having no hints whatsoever).
+// largely to be a barrier for debugger's stack trace unwinder (by being
+// implemented in assembly and having no hint directives whatsoever).
 static __NO_RETURN __NAKED void task_launchpad(__UNUSED void* user_data, __UNUSED TaskFunc* func) {
   // Call the function passed in the second parameter with the user data as its
   // first parameter which is already in r0.
   __ASM volatile("blx r1");
-  // TODO: Task termination isn't supported yet, a return must cause a fault.
+  __ASM volatile("bl %0" ::"i"(&task_exit));
+  // The task has been terminated, a return here must cause a fault.
   __ASM volatile("udf");
 }
 
 void task_spawn(struct Task* task, const struct TaskParams* params) {
   ASSERT(task != NULL);
   ASSERT(params != NULL);
-  struct TaskSchedulerState* state = &scheduler_state;
-  for (usize i = 0; i < SIZEOF(state->alive_tasks); i++) {
-    ASSERT(state->alive_tasks[i] != task);
-  }
-
-  usize free_idx = 0;
-  for (; free_idx < SIZEOF(state->alive_tasks); free_idx++) {
-    if (state->alive_tasks[free_idx] == NULL) break;
-  }
-  ASSERT(free_idx < SIZEOF(state->alive_tasks));
 
   ASSERT(params->func != NULL);
   ASSERT(params->stack_start != NULL);
   ASSERT(params->stack_size != 0);
   ASSERT((usize)params->stack_start % 8 == 0);
   ASSERT((usize)params->stack_size % 8 == 0);
+
+  struct ExceptionStackedContext {
+    u32 r0, r1, r2, r3, r12, lr, pc, xpsr;
+  };
+
+  struct TaskStackedContext {
+    u32 control, r4, r5, r6, r7, r8, r9, r10, r11, exc_return;
+  };
 
   u32 min_stack_size = sizeof(struct TaskStackedContext) + sizeof(struct ExceptionStackedContext);
 #if __FPU_USED == 1
@@ -90,9 +350,9 @@ void task_spawn(struct Task* task, const struct TaskParams* params) {
   ASSERT(params->stack_size >= min_stack_size);
 
   task->stack_ptr = params->stack_start + params->stack_size;
-  task->id = free_idx;
+  task->id = DEAD_TASK_ID;
+  task->prev = task->next = NULL;
   task->wait_deadline = NO_DEADLINE;
-  task->execution_time = 0;
   task->stack_start = params->stack_start;
   task->stack_size = params->stack_size;
 
@@ -108,7 +368,7 @@ void task_spawn(struct Task* task, const struct TaskParams* params) {
     // The other general-purpose registers are set to dummy values.
     ctx->r2 = 2, ctx->r3 = 3, ctx->r12 = 12;
     // Write garbage into LR so that returning causes an explosion.
-    ctx->lr = 0xFFFFFFFF;
+    ctx->lr = 0;
     // Execution will start here:
     ctx->pc = (usize)task_launchpad;
     // The EPSR.T (Thumb State) bit needs to be set depending on the last bit
@@ -133,8 +393,7 @@ void task_spawn(struct Task* task, const struct TaskParams* params) {
     ctx->exc_return = EXC_RETURN_THREAD_PSP;
   }
 
-  state->alive_tasks[free_idx] = task;
-  __atomic_fetch_or(&state->alive_tasks_mask, BIT(task->id), __ATOMIC_RELEASE);
+  syscall_1(SYSCALL_SPAWN, (usize)task);
 }
 
 // Approximately measures the highest stack usage of a task.
@@ -145,76 +404,12 @@ usize task_stack_high_watermark(struct Task* task) {
   return (usize)end - (usize)ptr;
 }
 
-static TasksMask task_process_timers(TasksMask timers_mask, u64 now) {
-  struct TaskSchedulerState* state = &scheduler_state;
-  TasksMask wake_up_mask = 0;
-  u64 closest_deadline = NO_DEADLINE;
-  while (timers_mask != 0) {
-    TaskId id = __builtin_ctz(timers_mask);
-    timers_mask &= ~BIT(id);
-    struct Task* task = state->alive_tasks[id];
-    Instant deadline = task->wait_deadline;
-    if (now >= deadline) {
-      wake_up_mask |= BIT(id);
-    } else if (deadline < closest_deadline) {
-      closest_deadline = deadline;
-    }
-  }
-  state->next_closest_deadline = closest_deadline;
-  // TODO: hwtimer_set_alarm(closest_deadline);
-  return wake_up_mask;
-}
-
-struct Task* task_standard_scheduler(struct Task* prev_task) {
-  acquire_scheduler_state();
-  struct TaskSchedulerState* state = &scheduler_state;
-
-  TasksMask alive_mask = __atomic_load_n(&state->alive_tasks_mask, __ATOMIC_ACQUIRE);
-  TasksMask wake_up_mask = __atomic_exchange_n(&state->woken_up_tasks_mask, 0, __ATOMIC_ACQUIRE);
-  TasksMask sleeping_mask =
-    __atomic_and_fetch(&state->sleeping_tasks_mask, alive_mask & ~wake_up_mask, __ATOMIC_ACQUIRE);
-  TasksMask new_timers = __atomic_exchange_n(&state->new_timers_mask, 0, __ATOMIC_ACQUIRE);
-
-  Instant now = systime_now();
-  if (unlikely(now >= state->next_closest_deadline || new_timers != 0)) {
-    wake_up_mask = task_process_timers(sleeping_mask, now);
-    sleeping_mask =
-      __atomic_and_fetch(&state->sleeping_tasks_mask, ~wake_up_mask, __ATOMIC_ACQ_REL);
-  }
-
-  TasksMask ready_mask = alive_mask & ~sleeping_mask;
-  struct Task* task = NULL;
-  if (ready_mask != 0) {
-    u32 rotation = prev_task->id + 1;
-    u32 ready_mask_rotated = __ROR((u32)ready_mask, rotation);
-    TaskId id = (__builtin_ctz(ready_mask_rotated) + rotation) % (sizeof(ready_mask) * 8);
-    task = state->alive_tasks[id];
-  }
-  release_scheduler_state();
-  return task;
-}
-
-static void on_task_switch(struct Task* task, u32 current_time) {
-  // Didn't want to write out the inline assembly for this, so have put this
-  // into a C function.
-  // TODO: This will also take time spent in the interrupt handlers called
-  // while the task was executing into account.
-  task->execution_time += current_time - task->last_switch_time;
-}
-
-// Since the only thing we currently implement through the SVC exception is
-// cooperative context switching with `task_yield` (we don't yet have a syscall
-// interface), to reduce the calling overhead the SVC handler is simply aliased
-// to the PendSV one. Implementing both exceptions with the same handler is
-// safe since they are set up to run at the same priority and thus can't
-// preempt each other.
-__ALIAS("PendSV_Handler") void SVC_Handler(void);
-
-// The core of the context switcher, based around the PendSV exception. Calls
-// the scheduler and performs a switch if necessary. Has to be written in
-// assembly to reduce the task switching overhead and because we are directly
-// dealing with the CPU registers here.
-__NAKED void PendSV_Handler(void) {
+// The core of the context switcher. Calls the scheduler and performs a switch
+// if necessary, must be invoked at the end of an exception handler, with the
+// LR set to the appropriate EXC_RETURN value and with no frames on the stack
+// in between. Has to be written in assembly to reduce the task switching
+// overhead and because we are directly dealing with the CPU registers here.
+static __NAKED void context_switch(void) {
   // A quick note before we start off: before entering the interrupt, the
   // hardware has already stacked a bunch of CPU registers, switched into
   // privileged mode and set the stack pointer to MSP (Main Stack Pointer),
@@ -225,15 +420,6 @@ __NAKED void PendSV_Handler(void) {
   // <https://developer.arm.com/documentation/ddi0439/b/Programmers-Model/Exceptions/Exception-handling>
 
   __ASM volatile( //
-    // First things first, load the address of the CPU cycle counter to measure
-    // it to increase the execution time of the current task. This must be done
-    // first so as to not bill the task for the run time of the scheduler,
-    // though it will include the overhead of interrupt entry.
-    "movw r1, #:lower16:%2\n\t"
-    "movt r1, #:upper16:%2\n\t"
-    // Load the value of `DWT->CYCCNT`.
-    "ldr r1, [r1]\n\t"
-
     // We need to back up the LR register (since we will need its EXC_RETURN
     // value for returning from the exception) before calling the scheduler
     // function, but to keep the stack aligned, another register has to be
@@ -255,29 +441,20 @@ __NAKED void PendSV_Handler(void) {
     // because it takes 2-5 cycles (see ARM 100166 section 3.3.3 "Load/store
     // timings") at best, usually 5, and a MOVW+MOVT combination predictably
     // takes just 2 cycles.
-    "movw r0, #:lower16:%0\n\t"
-    "movt r0, #:upper16:%0\n\t"
+    "movw r0, #:lower16:%[current_task]\n\t"
+    "movt r0, #:upper16:%[current_task]\n\t"
     // Load the pointer to the current task and put it into r4, which has been
     // backed up, so we can now use it for our purposes. The pointer is kept in
     // a callee-saved register because we will need it later after invoking the
     // scheduler.
     "ldr r4, [r0]\n\t"
 
-    // Skip over the next block if the current_task was NULL (we will need to
-    // talk about this again later).
-    "cbz r4, 3f\n\t"
-    // Call `on_task_switch`, which will perform some preparations for calling
-    // the scheduler. The task pointer for the `task` argument needs to be
-    // moved into r0, and the value for `current_time` is already in r1.
-    "mov r0, r4\n\t"
-    "bl %3\n\t"
-    "3:\n\t"
     // The `scheduler` function may now be called. The task pointer needs to be
-    // once again moved into r0, and the pointer to the next task will be
-    // returned into the same register; r4 will effectively contain the pointer
-    // to the previous task.
+    // into r0, the first argument register, and the pointer to the next task
+    // will be returned into the same register; r4 will effectively contain the
+    // pointer to the previous task.
     "mov r0, r4\n\t"
-    "bl %1\n\t"
+    "bl %[task_scheduler]\n\t"
 
     // Now that the next task has been determined, prepare to actually switch
     // the tasks. We first want to pop the registers which were pushed above.
@@ -301,8 +478,8 @@ __NAKED void PendSV_Handler(void) {
     "beq 2f\n\t"
 
     // Load the address of the `current_task` variable once again.
-    "movw r3, #:lower16:%0\n\t"
-    "movt r3, #:upper16:%0\n\t"
+    "movw r3, #:lower16:%[current_task]\n\t"
+    "movt r3, #:upper16:%[current_task]\n\t"
     // Store the next task pointer in `current_task`.
     "str r0, [r3]\n\t"
 
@@ -316,8 +493,9 @@ __NAKED void PendSV_Handler(void) {
     // normal and FPU registers, and we must stack the rest ourselves.
 
     // Saving the state must be skipped if the previous task was NULL.
-    // TODO: This will only ever happen once for the entire run time of the
-    // system, when entering the very first task, can this check be avoided?
+    // TODO: This will happen very rarely: once (over the entire run time of
+    // the system) when entering the very first task, and also when exiting
+    // tasks, can this check be avoided?
     "cbz r1, 1f\n\t"
     // Alright, all preparations and pre-flight checks have been completed.
     // Load the current PSP (Process Stack Pointer) - it is used while the CPU
@@ -375,41 +553,105 @@ __NAKED void PendSV_Handler(void) {
     // the return from an exception acts as one.
 
     "2:\n\t"
-    // Before we will be done, we must save the value of the CPU cycle counter
-    // at the time of switch into the other task. Load its address:
-    "movw r3, #:lower16:%2\n\t"
-    "movt r3, #:upper16:%2\n\t"
-    // Then load the value of `DWT->CYCCNT`:
-    "ldr r3, [r3]\n\t"
-    // And save it into the next task struct.
-    "str r3, [r0, #4]\n\t"
-
     // Finally, return from the interrupt handler, jumping into the next task.
     "bx lr\n\t" :: //
 
-    "i"(&scheduler_state.current_task),
-    "i"(&scheduler),
-    "i"(&DWT->CYCCNT),
-    "i"(&on_task_switch)
+      [current_task] "i"(&current_task),
+    [task_scheduler] "i"(&task_scheduler)
   );
 }
 
-__NO_RETURN void task_start_scheduling(void) {
-  __atomic_clear(&scheduler_state_lock, __ATOMIC_RELAXED);
-  task_yield();
-  __builtin_unreachable();
+__NAKED void PendSV_Handler(void) {
+  // No additional work beyond calling the context switcher is required within
+  // the PendSV handler.
+  __ASM volatile("b %0" ::"i"(&context_switch));
 }
 
-void task_wait_for_events(Instant deadline) {
-  struct TaskSchedulerState* state = &scheduler_state;
-  struct Task* task = state->current_task;
-  TasksMask task_mask = BIT(task->id);
-  task->wait_deadline = deadline;
-  if (unlikely(deadline != NO_DEADLINE)) {
-    __atomic_fetch_or(&state->new_timers_mask, task_mask, __ATOMIC_RELEASE);
-  }
-  __atomic_fetch_or(&state->sleeping_tasks_mask, task_mask, __ATOMIC_RELEASE);
-  task_yield();
+__NAKED void SVC_Handler(void) {
+  // NOTE on the syscall ABI: the low callee-saved registers r4-r6 are used for
+  // the syscall parameters and r7 is used for the syscall number, the syscalls
+  // themselves should be performed with the `SVC #0` instruction. There are
+  // two main reasons driving this decision:
+  //
+  // 1. Having the syscall number embedded in the immediate parameter of the
+  //    SVC instruction looks pretty, but requires a bunch of instructions to
+  //    decode: first you need to figure out which stack the caller was using
+  //    (PSP or MSP), load the PC from the stacked context, and then load a
+  //    halfword from memory with the instruction's immediate. Using a register
+  //    for this is simply more efficient, even though the caller has to add a
+  //    `MOVS r7, #X` instruction on their side.
+  //
+  // 2. The caller-saved registers (such as r0-r3) can't be used due to how
+  //    interrupts on Cortex-M interact with the calling convention. Suppose an
+  //    SVC instruction is issued by the application, and during the stacking
+  //    process a higher-priority (in other words: any) interrupt arrives. The
+  //    CPU will handle it first, and tail-chain the SVCall exception handler
+  //    without pushing any more context on the stack, which is perfectly safe
+  //    as long as everyone respects the calling convention. However, ISRs are
+  //    free to contaminate the caller-saved registers (r0-r3 and r12) since
+  //    all of them are on the stack and will be restored by the hardware.
+  //    However, for us this means that if we were to use r0-r3 for syscall
+  //    parameters, an early-arriving interrupt could clobber them all. Of
+  //    course, we could just load the values of r0-r3 from the stack, but that
+  //    is additional work as evidenced by the first point. In contrast, since
+  //    the software is responsible for restoring r4-r11 at the end of every
+  //    function, even if this exception gets tail-chained, the register values
+  //    will be those at the point of the `SVC` instruction.
+
+  __ASM volatile( //
+    // Since the YIELD syscall will be invoked very frequently, it is
+    // worthwhile to have a shortcut for it.
+    "cmp r7, %[SYSCALL_YIELD]\n\t"
+    // Jump to the context switcher immediately if the syscall number is
+    // SYSCALL_YIELD.
+    "beq %[context_switch]\n\t"
+
+    // Otherwise, save the LR before calling the syscall handler.
+    "push {r4, lr}\n\t"
+#ifdef __PLATFORMIO_BUILD_DEBUG__
+    ".cfi_adjust_cfa_offset 8\n\t"
+    ".cfi_rel_offset r4, 0\n\t"
+    ".cfi_rel_offset lr, 4\n\t"
+#endif
+
+    // Another shortcut, this time for SYSCALL_SLEEP, which will also be called
+    // really often.
+    "cmp r7, %[SYSCALL_SLEEP]\n\t"
+    "bne 1f\n\t"
+    // Hop into the SLEEP syscall's function immediately, without going through
+    // the handlers table.
+    "bl %[syscall_sleep]\n\t"
+    "b 2f\n\t"
+
+    // The branch for normal syscalls.
+    "1:\n\t"
+    // First, translate the argument registers from the syscall ABI into the
+    // normal C calling convention.
+    "mov r0, r4\n\t"
+    "mov r1, r5\n\t"
+    "mov r2, r6\n\t"
+    "mov r3, r7\n\t"
+    // And jump into the generic syscall handler.
+    "bl %[syscall_handler_entry]\n\t"
+
+    "2:\n\t"
+    // Restore the LR.
+    "pop {r4, lr}\n\t"
+#ifdef __PLATFORMIO_BUILD_DEBUG__
+    ".cfi_adjust_cfa_offset -8\n\t"
+    ".cfi_restore r4\n\t"
+    ".cfi_restore lr\n\t"
+#endif
+
+    // Finally, jump into the context switcher.
+    "b %[context_switch]" :: //
+
+      [context_switch] "i"(&context_switch),
+    [SYSCALL_YIELD] "n"(SYSCALL_YIELD),
+    [SYSCALL_SLEEP] "n"(SYSCALL_SLEEP),
+    [syscall_sleep] "i"(&syscall_sleep),
+    [syscall_handler_entry] "i"(&syscall_handler_entry)
+  );
 }
 
 void task_sleep(u32 delay) {
@@ -425,25 +667,12 @@ void task_notify_init(struct Notification* self) {
 }
 
 void task_wait(struct Notification* notify, Instant deadline) {
-  __atomic_fetch_or(&notify->waiters, BIT(scheduler_state.current_task->id), __ATOMIC_RELAXED);
+  __atomic_fetch_or(&notify->waiters, BIT(current_task->id), __ATOMIC_RELAXED);
   task_wait_for_events(deadline);
 }
 
-bool task_notify(struct Notification* notify) {
+TasksMask task_notify(struct Notification* notify) {
   TasksMask waiters = __atomic_exchange_n(&notify->waiters, 0, __ATOMIC_RELAXED);
-  __atomic_fetch_or(&scheduler_state.woken_up_tasks_mask, waiters, __ATOMIC_RELEASE);
-  return waiters != 0;
-}
-
-enum TaskStatus get_task_status(TaskId id) {
-  struct TaskSchedulerState* state = &scheduler_state;
-  TasksMask alive_mask = __atomic_load_n(&state->alive_tasks_mask, __ATOMIC_RELAXED);
-  TasksMask sleeping_mask = __atomic_load_n(&state->sleeping_tasks_mask, __ATOMIC_RELAXED);
-  if (!(alive_mask & BIT(id))) {
-    return TASK_DEAD;
-  } else if (sleeping_mask & BIT(id)) {
-    return TASK_SLEEPING;
-  } else {
-    return TASK_READY;
-  }
+  __atomic_fetch_or(&scheduler_state.woken_up_tasks_mask, waiters, __ATOMIC_RELAXED);
+  return waiters;
 }

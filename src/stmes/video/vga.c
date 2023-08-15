@@ -667,8 +667,24 @@ __STATIC_FORCEINLINE const VgaPixel* vga_fetch_next_scanline(u32 next_line_nr) {
   if (unlikely(requested_line_nr > state->frame_last_line)) return scanline;
   control->next_scanline_nr = requested_line_nr - state->frame_first_line;
   control->next_scanline_requested = true;
-  task_notify(&vga_notification);
-  task_yield_from_isr();
+  // We can't notify from every end-of-line interrupt because it creates a race
+  // condition:
+  // 1. When the scanout of the very last line ends, posting a notification
+  //    will invoke the task scheduler
+  // 2. But if it takes too long to run, end-of-frame interrupt will occur,
+  //    preempt it and post another notification
+  // 3. But from the former interrupt the scheduler has already concluded that
+  //    no work remains to be done (since no new scanlines were requested) and
+  //    put the system to sleep with the WFI instruction
+  // 4. The result: the rendering task doesn't see the end-of-frame
+  //    notification and won't get the next frame configuration ready!
+  //
+  // In short: notifying from every scanline interrupt creates a situation at
+  // the end of the frame where two notifications are posted in a short time
+  // span, and the task scheduler currently isn't equipped to handle that. TODO
+  if (task_notify(&vga_notification)) {
+    yield_from_isr();
+  }
   return scanline;
 }
 
@@ -745,8 +761,9 @@ void TIM1_BRK_TIM9_IRQHandler(void) {
     LL_TIM_ClearFlag_CC1(timer);
     u32 line_nr = vga_on_line_start();
     LL_TIM_OC_SetCompareCH1(timer, line_nr);
-    task_notify(&vga_notification);
-    task_yield_from_isr();
+    if (task_notify(&vga_notification)) {
+      yield_from_isr();
+    }
   }
 }
 

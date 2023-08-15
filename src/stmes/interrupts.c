@@ -1,17 +1,28 @@
 #include "stmes/interrupts.h"
+#include "stmes/kernel/task.h"
 #include "stmes/main.h"
 #include "stmes/utils.h"
 #include <stm32f4xx_hal.h>
 
 extern u32 _estack;
 
+// When the power is connected, the CPU first fetches the initial stack pointer
+// from address 0x00000000 and sets the MSP to that, then fetches the reset
+// handler from the vector table, whose address is stored at 0x00000004, and
+// begins code execution from there. All in all, this means that a normal C
+// function can be executed on boot right away, however, some setup needs to be
+// performed first before we can reach main().
 __NAKED void Reset_Handler(void) {
-  // Load the initial stack pointer. C functions can be called after this.
-  // TODO: movw/movt
-  __ASM volatile("ldr sp, =%0" ::"i"(&_estack));
+  // The first step is to put the C language runtime itself in a usable state.
   __ASM volatile("bl %0" ::"i"(&prestart));
-  __ASM volatile("bl %0" ::"i"(&main));
-  // The main() function should never return, trigger an exception if it had.
+  // The start_task_scheduler() function expects the initial stack pointer as
+  // its first argument, so that it can reset the MSP later. The need to read
+  // the SP accurately is the reason for writing this function in assembly.
+  __ASM volatile("mov r0, sp");
+  // The rest of the boot sequence will happen with the task scheduler online,
+  // main() will be executed in a task created for it by the scheduler.
+  __ASM volatile("bl %0" ::"i"(&start_task_scheduler));
+  // The execution should never return here, trigger an exception if it did.
   __ASM volatile("udf");
 }
 

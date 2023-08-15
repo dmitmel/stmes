@@ -8,11 +8,42 @@
 extern "C" {
 #endif
 
+enum Syscall {
+  SYSCALL_YIELD,
+  SYSCALL_SLEEP,
+  SYSCALL_SPAWN,
+  SYSCALL_EXIT,
+  SYSCALLS_COUNT,
+};
+
+// The system call ABI is described in the implementation file.
+
+__STATIC_FORCEINLINE void syscall_0(enum Syscall nr) {
+  register usize r7 __ASM("r7") = nr;
+  __ASM volatile("svc #0" ::"r"(r7) : "memory");
+}
+
+__STATIC_FORCEINLINE void syscall_1(enum Syscall nr, usize a) {
+  register usize r7 __ASM("r7") = nr, r4 __ASM("r4") = a;
+  __ASM volatile("svc #0" ::"r"(r7), "r"(r4) : "memory");
+}
+
+__STATIC_FORCEINLINE void syscall_2(enum Syscall nr, usize a, usize b) {
+  register usize r7 __ASM("r7") = nr, r4 __ASM("r4") = a, r5 __ASM("r5") = b;
+  __ASM volatile("svc #0" ::"r"(r7), "r"(r4), "r"(r5) : "memory");
+}
+
+__STATIC_FORCEINLINE void syscall_3(enum Syscall nr, usize a, usize b, usize c) {
+  register usize r7 __ASM("r7") = nr, r4 __ASM("r4") = a, r5 __ASM("r5") = b, r6 __ASM("r6") = c;
+  __ASM volatile("svc #0" ::"r"(r7), "r"(r4), "r"(r5), "r"(r6) : "memory");
+}
+
 typedef u8 TaskId;
-typedef u16 TasksMask;
+typedef u8 TaskPriority;
+typedef u32 TasksMask;
 
 #define MAX_ALIVE_TASKS (sizeof(TasksMask) * 8)
-#define DEAD_TASK_ID (~(TaskId)0)
+#define DEAD_TASK_ID ((TaskId)-1)
 
 typedef void TaskFunc(void* user_data);
 
@@ -27,56 +58,62 @@ struct Task {
   // NOTE: The inline assembly in the implementation relies on this being the
   // first member of the struct!!!
   u8* stack_ptr;
-  // NOTE: This must be the second member of the struct!!!
-  u32 last_switch_time;
   TaskId id;
-  Instant execution_time;
+  TaskPriority priority;
+  struct Task *next, *prev;
   Instant wait_deadline;
   u8* stack_start;
   usize stack_size;
 };
 
-enum TaskStatus {
-  TASK_DEAD,
-  TASK_READY,
-  TASK_SLEEPING,
-};
+__STATIC_INLINE struct Task* get_current_task(void) {
+  // A wrapper function is used to hide the variable and thus make it read-only
+  // outside the implementation file. Thanks to inlining though, calls to this
+  // function will compile down to a memory load instead of a full-blown call.
+  extern struct Task* current_task;
+  return current_task;
+}
 
-struct Task* scheduler(struct Task* prev_task);
-
-struct Task* get_task_by_id(TaskId id);
-struct Task* get_current_task(void);
-
+struct Task* task_scheduler(struct Task* prev_task);
+__NO_RETURN void start_task_scheduler(void* intial_stack_pointer);
 void task_spawn(struct Task* task, const struct TaskParams* params);
 usize task_stack_high_watermark(struct Task* task);
-struct Task* task_standard_scheduler(struct Task* prev_task);
-__NO_RETURN void task_start_scheduling(void);
 
 // Immediately performs a cooperative context switch.
-__STATIC_FORCEINLINE void task_yield(void) {
+__STATIC_FORCEINLINE void yield(void) {
   // The SVC instruction is used for this because it makes debugging much
   // easier (the debugger can step inside the `SVC_Handler`), unlike the PendSV
   // mechanism (while stepping the exception is not triggered at all, only when
-  // resuming execution, as it is an imprecise interrupt). Also, when inlined,
-  // the `SVC` instruction is as short as calling the function with `BL` (both
-  // are 32-bit).
-  __ASM volatile("svc #0" ::: "memory");
+  // resuming execution, as it is an imprecise interrupt).
+  syscall_0(SYSCALL_YIELD);
 }
 
 // Requests a context switch after the current interrupt (and all late-arriving
 // ones) have been handled.
-__STATIC_INLINE void task_yield_from_isr(void) {
+__STATIC_INLINE void yield_from_isr(void) {
   // PendSV is used for this type of switch (this is literally what it was
   // designed for).
   SCB->ICSR = SCB_ICSR_PENDSVSET_Msk;
-  __DSB(); // Flush all memory writes
-  __ISB(); // Flush the pipeline (to execute the above instruction *right now*)
+  // __DSB(); // Flush all memory writes
+  // __ISB(); // Flush the pipeline (to execute the above instruction *right now*)
 }
 
-void task_wait_for_events(Instant deadline);
-void task_sleep(u32 delay);
+__STATIC_INLINE void task_wait_for_events(Instant deadline) {
+  // Even though writes of 64-bit ints are not atomic on ARMv7m, it doesn't
+  // matter since the value of `wait_deadline` is considered valid only after
+  // the task has been put to sleep (basically, the execution status of the
+  // task acts as a lock here).
+  get_current_task()->wait_deadline = deadline;
+  syscall_0(SYSCALL_SLEEP);
+}
 
-enum TaskStatus get_task_status(TaskId id);
+__STATIC_INLINE __NO_RETURN void task_exit(void) {
+  syscall_0(SYSCALL_EXIT);
+  __builtin_unreachable();
+}
+
+void task_sleep(u32 delay);
+void task_join(struct Task* other_task); // TODO, requires its own syscall
 
 struct Notification {
   volatile TasksMask waiters;
@@ -84,7 +121,7 @@ struct Notification {
 
 void task_notify_init(struct Notification* self);
 void task_wait(struct Notification* notify, Instant deadline);
-bool task_notify(struct Notification* notify);
+TasksMask task_notify(struct Notification* notify);
 
 #ifdef __cplusplus
 }
