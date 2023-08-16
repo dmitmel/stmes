@@ -9,8 +9,8 @@ extern "C" {
 #endif
 
 enum Syscall {
-  SYSCALL_YIELD,
   SYSCALL_SLEEP,
+  SYSCALL_YIELD,
   SYSCALL_SPAWN,
   SYSCALL_EXIT,
   SYSCALLS_COUNT,
@@ -74,7 +74,7 @@ __STATIC_INLINE struct Task* get_current_task(void) {
   return current_task;
 }
 
-struct Task* task_scheduler(struct Task* prev_task);
+struct Task* task_scheduler(enum Syscall syscall_nr, struct Task* prev_task);
 void start_task_scheduler(void);
 void task_spawn(struct Task* task, const struct TaskParams* params);
 usize task_stack_high_watermark(struct Task* task);

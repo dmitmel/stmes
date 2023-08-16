@@ -13,7 +13,7 @@
 // (in particular rewriting the stack pointer) is always safe and returning
 // from it will always resume the execution of a task. Other interrupt handlers
 // may set the ICSR.PENDSVSET bit to essentially request a deferred context
-// switch after the processing of the current interrupt.
+// switch after the processing of the current interrupt is complete.
 //
 // The SVCall interrupt is given the lowest possible priority out of related
 // concerns: for one, it must be at that same priority level as PendSV, so that
@@ -30,6 +30,8 @@
 // bitmasks for waking up tasks with notifications - a single 32-bit mask can
 // essentially encode a list of 32 tasks, which greatly simplifies the structs
 // of synchronization primitives and makes them a lot more compact.
+
+// TODO: Time slicing.
 
 // TODO: Task priorities and a multi-level feedback queue scheduler.
 
@@ -162,11 +164,36 @@ static void wake_up_tasks(TasksMask mask) {
   }
 }
 
+// Referencing the scheduler_state directly in this function generates useless
+// address loads for its every field, so it's better to break the optimizer's
+// assumptions and pass this address from outside. A schizo-optimization, I
+// must admit.
+static void put_task_to_sleep(struct TaskSchedulerState* state, struct Task* task) {
+  state->ready_queue_head = task_queue_remove(state->ready_queue_head, task);
+  state->sleeping_queue_head = task_queue_insert(state->sleeping_queue_head, task);
+  // Re-checking all timers isn't required here, we only need to decrease the
+  // closest deadline if necessary.
+  Instant deadline = task->wait_deadline;
+  if (deadline < state->next_closest_deadline) {
+    state->next_closest_deadline = deadline;
+  }
+}
+
 // NOTE: This function will be executed very frequently (at least on every VGA
 // scanline), performance is CRITICAL here!
-struct Task* task_scheduler(struct Task* prev_task) {
-  UNUSED(prev_task);
+struct Task* task_scheduler(enum Syscall syscall_nr, struct Task* prev_task) {
   struct TaskSchedulerState* state = acquire_scheduler_state();
+
+  // The SLEEP syscall is BY FAR the most frequently invoked one (like, it
+  // accounts for 99% of all syscalls the system makes), so it is accelerated
+  // by being implemented directly inside the scheduler (along with the YIELD
+  // one, kinda, which essentially does nothing but cause a context switch) to
+  // bypass the normal syscall entry code and to avoid having to lock the
+  // scheduler state twice. This optimization certainly doesn't lead to the
+  // prettiest code, but that will suffice for now.
+  if (syscall_nr == SYSCALL_SLEEP) {
+    put_task_to_sleep(state, prev_task);
+  }
 
   struct Task* task;
   while (true) {
@@ -201,23 +228,6 @@ struct Task* task_scheduler(struct Task* prev_task) {
 
   release_scheduler_state();
   return task;
-}
-
-static void syscall_sleep(void) {
-  struct TaskSchedulerState* state = acquire_scheduler_state();
-
-  struct Task* task = current_task;
-  state->ready_queue_head = task_queue_remove(state->ready_queue_head, task);
-  state->sleeping_queue_head = task_queue_insert(state->sleeping_queue_head, task);
-
-  // Checking all timers isn't required here, we only need to decrease the
-  // closest deadline if necessary.
-  Instant deadline = task->wait_deadline;
-  if (deadline < state->next_closest_deadline) {
-    state->next_closest_deadline = deadline;
-  }
-
-  release_scheduler_state();
 }
 
 static void syscall_spawn(struct Task* task) {
@@ -257,13 +267,11 @@ static void syscall_exit(void) {
 
 static void syscall_handler_entry(usize arg1, usize arg2, usize arg3, enum Syscall syscall_nr) {
   UNUSED(arg2), UNUSED(arg3);
-  // This compiles to a jump table.
   switch (syscall_nr) {
     case SYSCALL_YIELD:
-      // The context switcher will be entered immediately after return, so the
-      // yield syscall essentially "does nothing".
+    case SYSCALL_SLEEP:
+      // These are implemented through the context switcher.
       return;
-    case SYSCALL_SLEEP: syscall_sleep(); return;
     case SYSCALL_SPAWN: syscall_spawn((struct Task*)arg1); return;
     case SYSCALL_EXIT: syscall_exit(); return;
     default: CRASH("Unknown syscall");
@@ -375,12 +383,13 @@ usize task_stack_high_watermark(struct Task* task) {
   return (usize)end - (usize)ptr;
 }
 
-// The core of the context switcher. Calls the scheduler and performs a switch
-// if necessary, must be invoked at the end of an exception handler, with the
-// LR set to the appropriate EXC_RETURN value and with no frames on the stack
-// in between. Has to be written in assembly to reduce the task switching
-// overhead and because we are directly dealing with the CPU registers here.
-static __NAKED void context_switch(void) {
+// The core of the context switcher. Takes the syscall number that has caused
+// the switch, calls the scheduler and performs a switch if necessary. Must be
+// invoked at the end of an exception handler, with the LR set to the
+// appropriate EXC_RETURN value and with no frames on the stack in between. Had
+// to be written in assembly to reduce the task switching overhead and because
+// we are directly dealing with the CPU registers here.
+static __NAKED void context_switch(__UNUSED enum Syscall syscall_nr) {
   // A quick note before we start off: before entering the interrupt, the
   // hardware has already stacked a bunch of CPU registers, switched into
   // privileged mode and set the stack pointer to MSP (Main Stack Pointer),
@@ -412,19 +421,20 @@ static __NAKED void context_switch(void) {
     // because it takes 2-5 cycles (see ARM 100166 section 3.3.3 "Load/store
     // timings") at best, usually 5, and a MOVW+MOVT combination predictably
     // takes just 2 cycles.
-    "movw r0, #:lower16:%[current_task]\n\t"
-    "movt r0, #:upper16:%[current_task]\n\t"
+    "movw r1, #:lower16:%[current_task]\n\t"
+    "movt r1, #:upper16:%[current_task]\n\t"
     // Load the pointer to the current task and put it into r4, which has been
     // backed up, so we can now use it for our purposes. The pointer is kept in
     // a callee-saved register because we will need it later after invoking the
     // scheduler.
-    "ldr r4, [r0]\n\t"
+    "ldr r4, [r1]\n\t"
 
     // The `scheduler` function may now be called. The task pointer needs to be
-    // into r0, the first argument register, and the pointer to the next task
-    // will be returned into the same register; r4 will effectively contain the
-    // pointer to the previous task.
-    "mov r0, r4\n\t"
+    // moved into r1, the second argument register, the syscall number is
+    // already in the first argument register r0. The pointer to the next task
+    // will be returned into r0; r4 will effectively contain the pointer to the
+    // previous task.
+    "mov r1, r4\n\t"
     "bl %[task_scheduler]\n\t"
 
     // Now that the next task has been determined, prepare to actually switch
@@ -533,8 +543,8 @@ static __NAKED void context_switch(void) {
 }
 
 __NAKED void PendSV_Handler(void) {
-  // No additional work beyond calling the context switcher is required within
-  // the PendSV handler.
+  // The PendSV handler effectively emulates the YIELD syscall.
+  __ASM volatile("movs r0, %0" ::"n"(SYSCALL_YIELD));
   __ASM volatile("b %0" ::"i"(&context_switch));
 }
 
@@ -570,14 +580,19 @@ __NAKED void SVC_Handler(void) {
   //    will be those at the point of the `SVC` instruction.
 
   __ASM volatile( //
-    // Since the YIELD syscall will be invoked very frequently, it is
-    // worthwhile to have a shortcut for it.
+    // Move the syscall number into the first argument register, for the
+    // purposes of the shortcuts below.
+    "mov r0, r7\n\t"
+    // A shortcut for the SLEEP syscall, which is invoked really frequently.
+    "cmp r7, %[SYSCALL_SLEEP]\n\t"
+    // Jump to the context switcher immediately if the syscall number matches.
+    "beq %[context_switch]\n\t"
+    // It is also worthwhile to have a shortcut for the YIELD syscall, which is
+    // also invoked very often.
     "cmp r7, %[SYSCALL_YIELD]\n\t"
-    // Jump to the context switcher immediately if the syscall number is
-    // SYSCALL_YIELD.
     "beq %[context_switch]\n\t"
 
-    // Otherwise, save the LR before calling the syscall handler.
+    // The normal syscall entry path. Save the LR before calling the handler.
     "push {r4, lr}\n\t"
 #ifdef __PLATFORMIO_BUILD_DEBUG__
     ".cfi_adjust_cfa_offset 8\n\t"
@@ -585,17 +600,6 @@ __NAKED void SVC_Handler(void) {
     ".cfi_rel_offset lr, 4\n\t"
 #endif
 
-    // Another shortcut, this time for SYSCALL_SLEEP, which will also be called
-    // really often.
-    "cmp r7, %[SYSCALL_SLEEP]\n\t"
-    "bne 1f\n\t"
-    // Hop into the SLEEP syscall's function immediately, without going through
-    // the handlers table.
-    "bl %[syscall_sleep]\n\t"
-    "b 2f\n\t"
-
-    // The branch for normal syscalls.
-    "1:\n\t"
     // First, translate the argument registers from the syscall ABI into the
     // normal C calling convention.
     "mov r0, r4\n\t"
@@ -605,7 +609,6 @@ __NAKED void SVC_Handler(void) {
     // And jump into the generic syscall handler.
     "bl %[syscall_handler_entry]\n\t"
 
-    "2:\n\t"
     // Restore the LR.
     "pop {r4, lr}\n\t"
 #ifdef __PLATFORMIO_BUILD_DEBUG__
@@ -614,13 +617,12 @@ __NAKED void SVC_Handler(void) {
     ".cfi_restore lr\n\t"
 #endif
 
-    // Finally, jump into the context switcher.
+    // Afterwards, jump into the context switcher.
     "b %[context_switch]" :: //
 
       [context_switch] "i"(&context_switch),
     [SYSCALL_YIELD] "n"(SYSCALL_YIELD),
     [SYSCALL_SLEEP] "n"(SYSCALL_SLEEP),
-    [syscall_sleep] "i"(&syscall_sleep),
     [syscall_handler_entry] "i"(&syscall_handler_entry)
   );
 }
