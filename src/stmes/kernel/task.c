@@ -31,6 +31,25 @@
 // essentially encode a list of 32 tasks, which greatly simplifies the structs
 // of synchronization primitives and makes them a lot more compact.
 
+// Some code and resources that have been useful or influenced my implementation:
+// <https://github.com/shinyblink/sled/blob/5bf73fe619aa48f2f697ab77dbd89a83f4c555d6/src/os/os_nrf51.c>
+// <https://www.youtube.com/watch?v=yHqaspeGJRw> - A deep-dive into the Chromium-EC OS
+// <https://github.com/coreboot/chrome-ec/blob/f00367769f565573e84e657ceef825ea2e07ac6d/core/cortex-m/task.c>
+// <https://github.com/coreboot/chrome-ec/blob/f00367769f565573e84e657ceef825ea2e07ac6d/core/cortex-m/switch.S>
+// <https://github.com/coreboot/chrome-ec/blob/f00367769f565573e84e657ceef825ea2e07ac6d/common/timer.c>
+// <https://github.com/coreboot/chrome-ec/blob/f00367769f565573e84e657ceef825ea2e07ac6d/chip/stm32/hwtimer32.c>
+// <https://github.com/oxidecomputer/hubris/blob/4176179293d3fcf0e77345ae26e71418a9ceeef5/sys/kern/src/arch/arm_m.rs>
+// <https://github.com/tock/tock/blob/1a111a3e748815117b0ef939ab730b31d77a409d/kernel/src/scheduler/round_robin.rs>
+// <https://interrupt.memfault.com/blog/cortex-m-rtos-context-switching>
+// <https://interrupt.memfault.com/blog/arm-cortex-m-exceptions-and-nvic>
+// <https://graphitemaster.github.io/fibers/>
+// <https://medium.com/@dheeptuck/building-a-real-time-operating-system-rtos-ground-up-a70640c64e93>
+// <https://www.adamh.cz/blog/2016/07/context-switch-on-the-arm-cortex-m0/>
+// <http://www.ethernut.de/en/documents/arm-inline-asm.html>
+// <https://github.com/oxidecomputer/hubris>
+// <https://www.youtube.com/watch?v=cypmufnPfLw> - The Pragmatism of Hubris
+// <http://cliffle.com/p/lilos/>
+
 // TODO: Time slicing.
 
 // TODO: Task priorities and a multi-level feedback queue scheduler.
@@ -511,11 +530,11 @@ static __NAKED void context_switch(__UNUSED enum Syscall syscall_nr) {
     // if any FP context has been pushed.
     "stmdb r2!, {r3, r4-r11, lr}\n\t"
     // Store the adjusted stack pointer in the previous task struct.
-    "str r2, [r1, #0]\n\t"
+    "str r2, [r1, %[task_stack_ptr]]\n\t"
 
     "1:\n\t"
     // Load the stack pointer of the next task.
-    "ldr r2, [r0, #0]\n\t"
+    "ldr r2, [r0, %[task_stack_ptr]]\n\t"
     // Pop the other task's core registers from its stack, its value of the
     // CONTROL register into r3 and its EXC_RETURN value into LR.
     "ldmia r2!, {r3, r4-r11, lr}\n\t"
@@ -538,7 +557,8 @@ static __NAKED void context_switch(__UNUSED enum Syscall syscall_nr) {
     "bx lr\n\t" :: //
 
       [current_task] "i"(&current_task),
-    [task_scheduler] "i"(&task_scheduler)
+    [task_scheduler] "i"(&task_scheduler),
+    [task_stack_ptr] "J"(offsetof(struct Task, stack_ptr))
   );
 }
 
@@ -628,10 +648,12 @@ __NAKED void SVC_Handler(void) {
 }
 
 void task_sleep(u32 delay) {
-  Instant deadline = systime_now() + delay;
+  Instant now = systime_now();
+  Instant deadline = now + delay;
   // TODO: Ensure minimum sleep time?
-  while (systime_now() < deadline) {
+  while (now < deadline) {
     task_wait_for_events(deadline);
+    now = systime_now();
   }
 }
 

@@ -55,8 +55,6 @@ struct TaskParams {
 };
 
 struct Task {
-  // NOTE: The inline assembly in the implementation relies on this being the
-  // first member of the struct!!!
   u8* stack_ptr;
   TaskId id;
   TaskPriority priority;

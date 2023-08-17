@@ -31,14 +31,12 @@ int main(void) {
   vga_start();
 
   // console_main_loop();
-  // frame_test_demo();
   // image_viewer_demo();
   // mandelbrot_demo();
   // print_tasks_demo();
   sd_card_benchmark();
   // terminal_demo();
   // video_player_demo();
-  // video_player_init();
 }
 
 // When the power is connected, the CPU first fetches the initial stack pointer
