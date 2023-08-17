@@ -68,3 +68,6 @@ macro_remap_dir(
 )
 
 env.Append(CCFLAGS=["-mno-unaligned-access"])
+
+# <https://github.com/raspberrypi/pico-sdk/issues/1029>
+env.Append(LINKFLAGS=["-Wl,--no-warn-rwx-segments"])

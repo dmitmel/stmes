@@ -44,3 +44,21 @@ int _write(int fd, const char* buf, size_t len) {
 void _putchar(char c) {
   console_putchar(c);
 }
+
+int _read(int fd, char* ptr, size_t len) {
+  UNUSED(fd), UNUSED(ptr), UNUSED(len);
+  errno = EBADF;
+  return -1;
+}
+
+int _close(int fd) {
+  UNUSED(fd);
+  errno = EBADF;
+  return -1;
+}
+
+off_t _lseek(int fd, off_t offset, int whence) {
+  UNUSED(fd), UNUSED(offset), UNUSED(whence);
+  errno = EBADF;
+  return 0;
+}
