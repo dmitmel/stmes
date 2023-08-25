@@ -79,7 +79,7 @@ void TIM5_IRQHandler(void) {
   TIM_TypeDef* hwtimer = TIM5;
   if (likely(LL_TIM_IsActiveFlag_CC1(hwtimer))) {
     LL_TIM_ClearFlag_CC1(hwtimer);
-    yield_from_isr();
+    task_yield_from_isr();
   }
 }
 
@@ -109,10 +109,11 @@ Instant systime_now(void) {
 // clang-format off
 HAL_StatusTypeDef HAL_InitTick(u32 priority) { UNUSED(priority); return HAL_OK; }
 u32 HAL_GetTick(void) { return __hwtimer_read(); }
+void HAL_Delay(u32 delay) { task_sleep(delay); }
 void HAL_SuspendTick(void) {}
 void HAL_ResumeTick(void) {}
 // clang-format on
 
 void SysTick_Handler(void) {
-  HAL_IncTick();
+  // HAL_IncTick();
 }

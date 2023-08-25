@@ -683,7 +683,7 @@ __STATIC_FORCEINLINE const VgaPixel* vga_fetch_next_scanline(u32 next_line_nr) {
   // the end of the frame where two notifications are posted in a short time
   // span, and the task scheduler currently isn't equipped to handle that. TODO
   if (task_notify(&vga_notification)) {
-    yield_from_isr();
+    task_yield_from_isr();
   }
   return scanline;
 }
@@ -762,7 +762,7 @@ void TIM1_BRK_TIM9_IRQHandler(void) {
     u32 line_nr = vga_on_line_start();
     LL_TIM_OC_SetCompareCH1(timer, line_nr);
     if (task_notify(&vga_notification)) {
-      yield_from_isr();
+      task_yield_from_isr();
     }
   }
 }

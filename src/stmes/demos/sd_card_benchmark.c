@@ -40,7 +40,7 @@ static void test_task_fn(__UNUSED void* user_data) {
     check_fs_error(f_open(&SDFile, "bebop_palette.bin", FA_READ));
 
     printf("loading %lu\n", f_size(&SDFile));
-    yield();
+    task_yield();
 
     usize total_bytes = 0;
     static char buf[BLOCKSIZE * 8];
@@ -71,7 +71,7 @@ static void test_task_fn(__UNUSED void* user_data) {
     // }
 
     task_notify(&progress_task_notify);
-    yield();
+    task_yield();
 
     Instant end_time = systime_now();
     printf("\n");

@@ -312,7 +312,7 @@ sdio_send_command_impl(SDIO_TypeDef* SDIOx, u32 arg, u8 cmd, enum SdioResponseFo
     // flags have been set.
     if (!(sdio_sta & SDIO_FLAG_CMDACT) && (sdio_sta & completion_flags)) break;
     if (hwtimer_read() - start_time >= timeout) return SDMMC_ERROR_TIMEOUT;
-    // if (should_yield) yield();
+    // if (should_yield) task_yield();
   }
   // This clears all kinds of completion flags:
   __SDIO_CLEAR_FLAG(SDIOx, SDIO_STATIC_CMD_FLAGS);

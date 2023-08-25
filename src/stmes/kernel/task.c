@@ -85,13 +85,26 @@ static struct TaskSchedulerState {
 static volatile bool scheduler_state_lock = true;
 
 // The kernel functions should lock the scheduler state before using it.
-__STATIC_INLINE struct TaskSchedulerState* acquire_scheduler_state(void) {
+__STATIC_FORCEINLINE struct TaskSchedulerState* acquire_scheduler_state(void) {
   bool was_locked = __atomic_test_and_set(&scheduler_state_lock, __ATOMIC_ACQUIRE);
   ASSERT(!was_locked);
   return &scheduler_state;
 }
 
-__STATIC_INLINE void release_scheduler_state(void) {
+__STATIC_FORCEINLINE void release_scheduler_state(void) {
+  __atomic_clear(&scheduler_state_lock, __ATOMIC_RELEASE);
+}
+
+void start_task_scheduler(void) {
+  struct TaskSchedulerState* state = &scheduler_state;
+  state->ready_queue_head = NULL;
+  state->sleeping_queue_head = NULL;
+  state->woken_up_tasks_mask = 0;
+  state->next_closest_deadline = NO_DEADLINE;
+
+  HAL_NVIC_SetPriority(SVCall_IRQn, 0xF, 0xF);
+  HAL_NVIC_SetPriority(PendSV_IRQn, 0xF, 0xF);
+
   __atomic_clear(&scheduler_state_lock, __ATOMIC_RELEASE);
 }
 
@@ -115,7 +128,7 @@ __STATIC_INLINE struct Task* task_queue_remove(struct Task* head, struct Task* n
   if (unlikely(next == node)) { // This was the last node
     return NULL;
   }
-  prev->next = next, next->prev = prev;
+  prev->next = next, next->prev = prev; // Unlink the node out of the list
   return head == node ? next : head;
 }
 
@@ -155,7 +168,7 @@ static TasksMask process_task_timers(u64 now) {
   } while (task != first_task);
 
   state->next_closest_deadline = closest_deadline;
-  // TODO: hwtimer_set_alarm(closest_deadline);
+  // TODO: hwtimer_set_alarm((u32)closest_deadline);
   return wake_up_mask;
 }
 
@@ -164,6 +177,15 @@ static void wake_up_tasks(TasksMask mask) {
   static struct TaskSchedulerState* state = &scheduler_state;
   struct Task* first_task = state->sleeping_queue_head;
   if (unlikely(first_task == NULL)) return;
+
+  // A fast path which is taken surprisingly often, like in the ~80% of cases
+  // (judging by my demos). NOTE that this will have to be removed if we start
+  // supporting running more tasks than TasksMask has bits.
+  if (likely(mask == BIT(first_task->id))) {
+    state->sleeping_queue_head = task_queue_remove(state->sleeping_queue_head, first_task);
+    state->ready_queue_head = task_queue_insert(state->ready_queue_head, first_task);
+    return;
+  }
 
   struct Task* task = first_task;
   while (true) {
@@ -188,6 +210,28 @@ static void wake_up_tasks(TasksMask mask) {
 // assumptions and pass this address from outside. A schizo-optimization, I
 // must admit.
 static void put_task_to_sleep(struct TaskSchedulerState* state, struct Task* task) {
+  struct Notification* notification = task->wait_notification;
+  if (notification != NULL) {
+    // NOTE: The actual assignment of a task to a notification happens inside
+    // the WAIT syscall function as a workaround for a subtle race condition.
+    // In the way it had been done before, i.e. having the atomic-or operation
+    // to register ourselves as waiting for the notification inside `task_wait`
+    // function and then making the WAIT syscall, introduced a bug which would
+    // cause notifications to be dropped and create a sleeping task that would
+    // never wake up. Suppose an interrupt happens in between the registration
+    // and making the syscall, which posts a notification and requests a
+    // deferred context switch through PendSV. Consequently, after that
+    // interrupt returns, the scheduler will be entered, see that there has
+    // been a notification and request to wake up our current task (which, mind
+    // you, hasn't gone to sleep yet), process it and resume the execution of
+    // that task. And thus, the WAIT syscall will be reached without the
+    // knowledge that the task is waiting for the notification since it has
+    // already been "woken up". This could be solved by establishing a critical
+    // section over the registration and the syscall, but the key here is the
+    // scheduler preempting `task_wait`, so we just have to move this whole
+    // logic into the kernel (as it can't preempt itself).
+    __atomic_or_fetch(&notification->waiters, BIT(task->id), __ATOMIC_RELAXED);
+  }
   state->ready_queue_head = task_queue_remove(state->ready_queue_head, task);
   state->sleeping_queue_head = task_queue_insert(state->sleeping_queue_head, task);
   // Re-checking all timers isn't required here, we only need to decrease the
@@ -195,6 +239,7 @@ static void put_task_to_sleep(struct TaskSchedulerState* state, struct Task* tas
   Instant deadline = task->wait_deadline;
   if (deadline < state->next_closest_deadline) {
     state->next_closest_deadline = deadline;
+    // TODO: hwtimer_set_alarm((u32)deadline);
   }
 }
 
@@ -203,14 +248,14 @@ static void put_task_to_sleep(struct TaskSchedulerState* state, struct Task* tas
 struct Task* task_scheduler(enum Syscall syscall_nr, struct Task* prev_task) {
   struct TaskSchedulerState* state = acquire_scheduler_state();
 
-  // The SLEEP syscall is BY FAR the most frequently invoked one (like, it
-  // accounts for 99% of all syscalls the system makes), so it is accelerated
+  // The WAIT syscall is BY FAR the most frequently invoked one (like, it
+  // accounts for 99% of all syscalls made in the system), so it is accelerated
   // by being implemented directly inside the scheduler (along with the YIELD
   // one, kinda, which essentially does nothing but cause a context switch) to
   // bypass the normal syscall entry code and to avoid having to lock the
   // scheduler state twice. This optimization certainly doesn't lead to the
   // prettiest code, but that will suffice for now.
-  if (syscall_nr == SYSCALL_SLEEP) {
+  if (syscall_nr == SYSCALL_WAIT) {
     put_task_to_sleep(state, prev_task);
   }
 
@@ -247,6 +292,45 @@ struct Task* task_scheduler(enum Syscall syscall_nr, struct Task* prev_task) {
 
   release_scheduler_state();
   return task;
+}
+
+void task_notify_init(struct Notification* self) {
+  __atomic_store_n(&self->waiters, 0, __ATOMIC_RELAXED);
+}
+
+TasksMask task_notify(struct Notification* notify) {
+  TasksMask waiters = __atomic_exchange_n(&notify->waiters, 0, __ATOMIC_RELAXED);
+  __atomic_fetch_or(&scheduler_state.woken_up_tasks_mask, waiters, __ATOMIC_RELAXED);
+  return waiters;
+}
+
+void task_wait(struct Notification* notification, Instant deadline) {
+  struct Task* task = get_current_task();
+  // Even though there is no lock protecting these fields, and writes of 64-bit
+  // ints are not even atomic on ARMv7m, it doesn't matter since their values
+  // are considered valid only when the task has been put to sleep (basically,
+  // the execution status of the task itself acts as a lock here).
+  task->wait_deadline = deadline;
+  task->wait_notification = notification;
+  syscall_0(SYSCALL_WAIT);
+}
+
+void task_sleep(u32 delay) {
+  Instant now = systime_now();
+  Instant deadline = now + delay;
+  // TODO: Ensure minimum sleep time?
+  while (now < deadline) {
+    task_wait(NULL, deadline);
+    now = systime_now();
+  }
+}
+
+void task_sleep_until(Instant deadline) {
+  Instant now = systime_now();
+  while (now < deadline) {
+    task_wait(NULL, deadline);
+    now = systime_now();
+  }
 }
 
 static void syscall_spawn(struct Task* task) {
@@ -288,7 +372,7 @@ static void syscall_handler_entry(usize arg1, usize arg2, usize arg3, enum Sysca
   UNUSED(arg2), UNUSED(arg3);
   switch (syscall_nr) {
     case SYSCALL_YIELD:
-    case SYSCALL_SLEEP:
+    case SYSCALL_WAIT:
       // These are implemented through the context switcher.
       return;
     case SYSCALL_SPAWN: syscall_spawn((struct Task*)arg1); return;
@@ -297,23 +381,10 @@ static void syscall_handler_entry(usize arg1, usize arg2, usize arg3, enum Sysca
   }
 }
 
-void start_task_scheduler(void) {
-  struct TaskSchedulerState* state = &scheduler_state;
-  state->ready_queue_head = NULL;
-  state->sleeping_queue_head = NULL;
-  state->woken_up_tasks_mask = 0;
-  state->next_closest_deadline = NO_DEADLINE;
-
-  HAL_NVIC_SetPriority(SVCall_IRQn, 0xF, 0xF);
-  HAL_NVIC_SetPriority(PendSV_IRQn, 0xF, 0xF);
-
-  __atomic_clear(&scheduler_state_lock, __ATOMIC_RELEASE);
-}
-
 // This function is the bottom-most frame of every task stack and exists
 // largely to be a barrier for debugger's stack trace unwinder (by being
 // implemented in assembly and having no hint directives whatsoever).
-static __NO_RETURN __NAKED void task_launchpad(__UNUSED void* user_data, __UNUSED TaskFunc* func) {
+static __NO_RETURN __NAKED void task_launchpad(__UNUSED void* user_data, __UNUSED TaskFn* func) {
   // Call the function passed in the second parameter with the user data as its
   // first parameter which is already in r0.
   __ASM volatile("blx r1");
@@ -349,8 +420,10 @@ void task_spawn(struct Task* task, const struct TaskParams* params) {
 
   task->stack_ptr = params->stack_start + params->stack_size;
   task->id = DEAD_TASK_ID;
+  task->priority = 0;
   task->prev = task->next = NULL;
   task->wait_deadline = NO_DEADLINE;
+  task->wait_notification = NULL;
   task->stack_start = params->stack_start;
   task->stack_size = params->stack_size;
 
@@ -563,8 +636,8 @@ static __NAKED void context_switch(__UNUSED enum Syscall syscall_nr) {
 }
 
 __NAKED void PendSV_Handler(void) {
-  // The PendSV handler effectively emulates the YIELD syscall.
-  __ASM volatile("movs r0, %0" ::"n"(SYSCALL_YIELD));
+  // The PendSV handler effectively emulates the DEFERRED_YIELD syscall.
+  __ASM volatile("movs r0, %0" ::"n"(SYSCALL_DEFERRED_YIELD));
   __ASM volatile("b %0" ::"i"(&context_switch));
 }
 
@@ -603,8 +676,8 @@ __NAKED void SVC_Handler(void) {
     // Move the syscall number into the first argument register, for the
     // purposes of the shortcuts below.
     "mov r0, r7\n\t"
-    // A shortcut for the SLEEP syscall, which is invoked really frequently.
-    "cmp r7, %[SYSCALL_SLEEP]\n\t"
+    // A shortcut for the WAIT syscall, which is invoked really frequently.
+    "cmp r7, %[SYSCALL_WAIT]\n\t"
     // Jump to the context switcher immediately if the syscall number matches.
     "beq %[context_switch]\n\t"
     // It is also worthwhile to have a shortcut for the YIELD syscall, which is
@@ -637,37 +710,15 @@ __NAKED void SVC_Handler(void) {
     ".cfi_restore lr\n\t"
 #endif
 
+    // Move the syscall number argument again from r7 (that register wouldn't
+    // have been changed across the function calls).
+    "mov r0, r7\n\t"
     // Afterwards, jump into the context switcher.
     "b %[context_switch]" :: //
 
       [context_switch] "i"(&context_switch),
     [SYSCALL_YIELD] "n"(SYSCALL_YIELD),
-    [SYSCALL_SLEEP] "n"(SYSCALL_SLEEP),
+    [SYSCALL_WAIT] "n"(SYSCALL_WAIT),
     [syscall_handler_entry] "i"(&syscall_handler_entry)
   );
-}
-
-void task_sleep(u32 delay) {
-  Instant now = systime_now();
-  Instant deadline = now + delay;
-  // TODO: Ensure minimum sleep time?
-  while (now < deadline) {
-    task_wait_for_events(deadline);
-    now = systime_now();
-  }
-}
-
-void task_notify_init(struct Notification* self) {
-  __atomic_store_n(&self->waiters, 0, __ATOMIC_RELAXED);
-}
-
-void task_wait(struct Notification* notify, Instant deadline) {
-  __atomic_fetch_or(&notify->waiters, BIT(current_task->id), __ATOMIC_RELAXED);
-  task_wait_for_events(deadline);
-}
-
-TasksMask task_notify(struct Notification* notify) {
-  TasksMask waiters = __atomic_exchange_n(&notify->waiters, 0, __ATOMIC_RELAXED);
-  __atomic_fetch_or(&scheduler_state.woken_up_tasks_mask, waiters, __ATOMIC_RELAXED);
-  return waiters;
 }

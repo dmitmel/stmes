@@ -48,6 +48,6 @@ void mutex_unlock(struct Mutex* self) {
   __atomic_store_n(&self->owner, DEAD_TASK_ID, __ATOMIC_RELAXED);
   __atomic_clear(&self->locked, __ATOMIC_RELEASE);
   if (task_notify(&self->notify)) {
-    yield();
+    task_yield();
   }
 }

@@ -9,8 +9,9 @@ extern "C" {
 #endif
 
 enum Syscall {
-  SYSCALL_SLEEP,
+  SYSCALL_WAIT,
   SYSCALL_YIELD,
+  SYSCALL_DEFERRED_YIELD,
   SYSCALL_SPAWN,
   SYSCALL_EXIT,
   SYSCALLS_COUNT,
@@ -42,15 +43,19 @@ typedef u8 TaskId;
 typedef u8 TaskPriority;
 typedef u32 TasksMask;
 
+struct Notification {
+  volatile TasksMask waiters;
+};
+
 #define MAX_ALIVE_TASKS (sizeof(TasksMask) * 8)
 #define DEAD_TASK_ID ((TaskId)-1)
 
-typedef void TaskFunc(void* user_data);
+typedef void TaskFn(void* user_data);
 
 struct TaskParams {
   u8* stack_start;
   usize stack_size;
-  TaskFunc* func;
+  TaskFn* func;
   void* user_data;
 };
 
@@ -60,6 +65,7 @@ struct Task {
   TaskPriority priority;
   struct Task *next, *prev;
   Instant wait_deadline;
+  struct Notification* wait_notification;
   u8* stack_start;
   usize stack_size;
 };
@@ -72,13 +78,19 @@ __STATIC_INLINE struct Task* get_current_task(void) {
   return current_task;
 }
 
-struct Task* task_scheduler(enum Syscall syscall_nr, struct Task* prev_task);
 void start_task_scheduler(void);
+struct Task* task_scheduler(enum Syscall syscall_nr, struct Task* prev_task);
+void task_notify_init(struct Notification* self);
+TasksMask task_notify(struct Notification* notification);
+void task_wait(struct Notification* notification, Instant deadline);
+void task_sleep(u32 delay);
+void task_sleep_until(Instant deadline);
+void task_join(struct Task* other_task); // TODO, requires its own syscall
 void task_spawn(struct Task* task, const struct TaskParams* params);
 usize task_stack_high_watermark(struct Task* task);
 
 // Immediately performs a cooperative context switch.
-__STATIC_FORCEINLINE void yield(void) {
+__STATIC_FORCEINLINE void task_yield(void) {
   // The SVC instruction is used for this because it makes debugging much
   // easier (the debugger can step inside the `SVC_Handler`), unlike the PendSV
   // mechanism (while stepping the exception is not triggered at all, only when
@@ -88,38 +100,16 @@ __STATIC_FORCEINLINE void yield(void) {
 
 // Requests a context switch after the current interrupt (and all late-arriving
 // ones) have been handled.
-__STATIC_INLINE void yield_from_isr(void) {
+__STATIC_INLINE void task_yield_from_isr(void) {
   // PendSV is used for this type of switch (this is literally what it was
   // designed for).
   SCB->ICSR = SCB_ICSR_PENDSVSET_Msk;
-  // __DSB(); // Flush all memory writes
-  // __ISB(); // Flush the pipeline (to execute the above instruction *right now*)
-}
-
-__STATIC_INLINE void task_wait_for_events(Instant deadline) {
-  // Even though writes of 64-bit ints are not atomic on ARMv7m, it doesn't
-  // matter since the value of `wait_deadline` is considered valid only after
-  // the task has been put to sleep (basically, the execution status of the
-  // task acts as a lock here).
-  get_current_task()->wait_deadline = deadline;
-  syscall_0(SYSCALL_SLEEP);
 }
 
 __STATIC_INLINE __NO_RETURN void task_exit(void) {
   syscall_0(SYSCALL_EXIT);
   __builtin_unreachable();
 }
-
-void task_sleep(u32 delay);
-void task_join(struct Task* other_task); // TODO, requires its own syscall
-
-struct Notification {
-  volatile TasksMask waiters;
-};
-
-void task_notify_init(struct Notification* self);
-void task_wait(struct Notification* notify, Instant deadline);
-TasksMask task_notify(struct Notification* notify);
 
 #ifdef __cplusplus
 }

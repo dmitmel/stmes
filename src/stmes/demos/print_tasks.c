@@ -1,4 +1,5 @@
 #include "stmes/demos.h"
+#include "stmes/kernel/sync.h"
 #include "stmes/kernel/task.h"
 #include "stmes/utils.h"
 #include "stmes/video/console.h"
@@ -8,11 +9,12 @@
 static u8 render_task_stack[1024] __ALIGNED(8);
 static struct Task render_task;
 
-static TaskFunc print_task_fn;
 static struct {
   u8 stack[1024] __ALIGNED(8);
   struct Task task;
 } print_tasks[8];
+
+static struct Mutex console_mutex;
 
 static void render_task_fn(__UNUSED void* user_data) {
   while (true) {
@@ -32,10 +34,12 @@ static void print_task_fn(__UNUSED void* user_data) {
   u32 task_idx = (u32)user_data;
   u32 counter = 0;
   while (true) {
+    mutex_lock(&console_mutex);
     console_set_cursor_line(task_idx);
     console_clear_cursor_line();
     printf("%" PRIu32 " %" PRIu32 "\n", task_idx, counter);
     counter += 1;
+    mutex_unlock(&console_mutex);
     task_sleep(task_idx + 1);
   }
 }
