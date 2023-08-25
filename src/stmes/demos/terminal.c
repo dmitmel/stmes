@@ -59,8 +59,10 @@ static void terminal_task_fn(__UNUSED void* user_data) {
     if (fno.fname[0] == '\0') {
       break;
     }
+    char size_str[16];
+    humanize_bytes(size_str, sizeof(size_str), fno.fsize);
     printf(
-      "%s%s%s%s%s %04d-%02d-%02d %02d:%02d:%02d %6luk %s\n",
+      "%s%s%s%s%s %04d-%02d-%02d %02d:%02d:%02d %6s %s\n",
       fno.fattrib & AM_ARC ? "A" : "-",
       fno.fattrib & AM_DIR ? "D" : "-",
       fno.fattrib & AM_SYS ? "S" : "-",
@@ -72,7 +74,7 @@ static void terminal_task_fn(__UNUSED void* user_data) {
       (fno.ftime >> 11) & MASK(5),
       (fno.ftime >> 5) & MASK(6),
       fno.ftime & MASK(5),
-      fno.fsize / 1024,
+      size_str,
       fno.fname
     );
     task_sleep(500);

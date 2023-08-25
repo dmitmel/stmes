@@ -149,6 +149,9 @@ void fast_memcpy_u32(u32* dst, const u32* src, usize n);
 #define interrupt_number() (__get_IPSR())
 #define in_interrupt_handler() (__get_IPSR() != 0)
 
+i32 humanize_units(char* buf, usize buf_size, i64 value);
+i32 humanize_bytes(char* buf, usize buf_size, i64 bytes);
+
 #ifdef __cplusplus
 }
 #endif
