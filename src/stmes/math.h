@@ -1,5 +1,5 @@
 #include <math.h>
-#include <stm32f4xx.h>
+#include <stm32f4xx_hal.h>
 
 __STATIC_INLINE float lerpf(float a, float b, float t) {
   // <https://fgiesen.wordpress.com/2012/08/15/linear-interpolation-past-present-and-future/>

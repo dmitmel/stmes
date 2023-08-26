@@ -4,6 +4,7 @@
 #include "stmes/utils.h"
 #include "stmes/video/framebuf.h"
 #include "stmes/video/vga.h"
+#include "stmes/video/vga_color.h"
 #include <ff.h>
 #include <stdlib.h>
 #include <stm32f4xx_hal.h>

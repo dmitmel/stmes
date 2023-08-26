@@ -5,6 +5,7 @@
 #include "stmes/video/console.h"
 #include "stmes/video/framebuf.h"
 #include "stmes/video/vga.h"
+#include "stmes/video/vga_color.h"
 #include <math.h>
 #include <printf.h>
 

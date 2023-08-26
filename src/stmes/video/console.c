@@ -5,6 +5,7 @@
 #include "stmes/video/console_font.h"
 #include "stmes/video/framebuf.h"
 #include "stmes/video/vga.h"
+#include "stmes/video/vga_color.h"
 #include <printf.h>
 
 // #define CONSOLE_DEBUG

@@ -7,6 +7,7 @@
 #include "stmes/utils.h"
 #include "stmes/video/console.h"
 #include "stmes/video/vga.h"
+#include "stmes/video/vga_color.h"
 #include <math.h>
 #include <printf.h>
 #include <stm32f4xx_hal.h>
