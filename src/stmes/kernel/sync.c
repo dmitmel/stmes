@@ -51,3 +51,58 @@ void mutex_unlock(struct Mutex* self) {
     task_yield();
   }
 }
+
+void channel_init(struct Channel* self) {
+  __atomic_store_n(&self->state, CHANNEL_IDLE, __ATOMIC_RELAXED);
+  task_notify_init(&self->notify);
+  self->message = NULL;
+  self->message_size = 0;
+}
+
+void channel_send(struct Channel* self, void* message, usize size) {
+  // Wait for the possibility to claim the channel for ourselves
+  while (true) {
+    enum ChannelState wanted_state = CHANNEL_IDLE, next_state = CHANNEL_SENDING_MESSAGE;
+    bool success = __atomic_compare_exchange_n(
+      &self->state, &wanted_state, next_state, /* weak */ false, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED
+    );
+    if (success) break;
+    task_wait(&self->notify, NO_DEADLINE);
+  }
+  // Send the message
+  self->message = message;
+  self->message_size = size;
+  __atomic_store_n(&self->state, CHANNEL_MESSAGE_SENT, __ATOMIC_RELEASE);
+  if (task_notify(&self->notify)) {
+    task_yield();
+  }
+  // Wait for the message to be received on the other side
+  while (__atomic_load_n(&self->state, __ATOMIC_ACQUIRE) != CHANNEL_MESSAGE_RECEIVED) {
+    task_wait(&self->notify, NO_DEADLINE);
+  }
+  // Conclude the transaction
+  __atomic_store_n(&self->state, CHANNEL_IDLE, __ATOMIC_RELEASE);
+  if (task_notify(&self->notify)) {
+    task_yield();
+  }
+}
+
+void channel_recv(struct Channel* self, void* message, usize size) {
+  // Wait for the possibility to claim a sent message for ourselves
+  while (true) {
+    u8 wanted_state = CHANNEL_MESSAGE_SENT, next_state = CHANNEL_RECEIVING_MESSAGE;
+    bool success = __atomic_compare_exchange_n(
+      &self->state, &wanted_state, next_state, /* weak */ false, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED
+    );
+    if (success) break;
+    task_wait(&self->notify, NO_DEADLINE);
+  }
+  // Receive the message
+  ASSERT(self->message_size == size);
+  __builtin_memcpy(message, self->message, size);
+  // Signal that the message has been received
+  __atomic_store_n(&self->state, CHANNEL_MESSAGE_RECEIVED, __ATOMIC_RELEASE);
+  if (task_notify(&self->notify)) {
+    task_yield();
+  }
+}
