@@ -10,6 +10,7 @@ extern "C" {
 #define BLTN_LED_GPIO_Port GPIOC
 #define BLTN_KEY_Pin GPIO_PIN_0
 #define BLTN_KEY_GPIO_Port GPIOA
+#define BLTN_KEY_EXTI_IRQn EXTI0_IRQn
 
 #define SDIO_CD_Pin GPIO_PIN_1
 #define SDIO_CD_GPIO_Port GPIOA
@@ -49,7 +50,9 @@ extern "C" {
    VGA_PIXEL11_Pin | VGA_PIXEL12_Pin)
 #define VGA_PIXEL_ALL_PINS_RESET (VGA_PIXEL_ALL_PINS << 16u)
 
-void MX_GPIO_Init(void);
+extern struct Notification gpio_button_notification;
+
+void gpio_init(void);
 
 #ifdef __cplusplus
 }

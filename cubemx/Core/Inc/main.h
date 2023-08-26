@@ -61,6 +61,7 @@ void Error_Handler(void);
 #define BLTN_LED_GPIO_Port GPIOC
 #define BLTN_KEY_Pin GPIO_PIN_0
 #define BLTN_KEY_GPIO_Port GPIOA
+#define BLTN_KEY_EXTI_IRQn EXTI0_IRQn
 #define SDIO_CD_Pin GPIO_PIN_1
 #define SDIO_CD_GPIO_Port GPIOA
 #define VGA_HSYNC_Pin GPIO_PIN_2

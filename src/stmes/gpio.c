@@ -1,7 +1,12 @@
 #include "stmes/gpio.h"
+#include "stmes/interrupts.h"
+#include "stmes/kernel/task.h"
 #include <stm32f4xx_hal.h>
+#include <stm32f4xx_ll_exti.h>
 
-void MX_GPIO_Init(void) {
+struct Notification gpio_button_notification;
+
+void gpio_init(void) {
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
@@ -13,10 +18,12 @@ void MX_GPIO_Init(void) {
 
   gpio_init = (GPIO_InitTypeDef){
     .Pin = BLTN_KEY_Pin,
-    .Mode = GPIO_MODE_INPUT,
+    .Mode = GPIO_MODE_IT_RISING_FALLING,
     .Pull = GPIO_PULLUP,
   };
   HAL_GPIO_Init(BLTN_KEY_GPIO_Port, &gpio_init);
+  HAL_NVIC_SetPriority(BLTN_KEY_EXTI_IRQn, 8, 0);
+  HAL_NVIC_EnableIRQ(BLTN_KEY_EXTI_IRQn);
 
   gpio_init = (GPIO_InitTypeDef){
     .Pin = BLTN_LED_Pin,
@@ -39,4 +46,13 @@ void MX_GPIO_Init(void) {
     .Pull = GPIO_NOPULL,
   };
   HAL_GPIO_Init(GPIOA, &gpio_init);
+}
+
+void EXTI0_IRQHandler(void) {
+  if (LL_EXTI_IsActiveFlag_0_31(BLTN_KEY_Pin)) {
+    LL_EXTI_ClearFlag_0_31(BLTN_KEY_Pin);
+    if (task_notify(&gpio_button_notification)) {
+      task_yield_from_isr();
+    }
+  }
 }

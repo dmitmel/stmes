@@ -22,7 +22,7 @@ static void system_clock_config(void);
 int main(void) {
   console_init();
 
-  MX_GPIO_Init();
+  gpio_init();
   MX_DMA_Init();
   MX_SDIO_SD_Init();
 

@@ -10,6 +10,16 @@
 #include "stmes/video/vga_color.h"
 #include <ff.h>
 #include <stm32f4xx_hal.h>
+#include <stm32f4xx_ll_gpio.h>
+
+static void button_task_fn(void* user_data) {
+  volatile bool* button_pressed = user_data;
+  while (true) {
+    task_wait(&gpio_button_notification, NO_DEADLINE);
+    task_sleep(20);
+    *button_pressed = LL_GPIO_IsInputPinSet(BLTN_KEY_GPIO_Port, BLTN_KEY_Pin);
+  }
+}
 
 struct BufferedReader {
   u8 buffer[BLOCKSIZE * 8];
@@ -35,6 +45,17 @@ static u8* buffered_read(struct BufferedReader* self, FIL* file, FSIZE_t pos, FS
 }
 
 void video_player_demo(void) {
+  volatile bool button_pressed;
+  static struct Task button_task;
+  static u8 button_task_stack[256] __ALIGNED(8);
+  struct TaskParams button_task_params = {
+    .stack_start = button_task_stack,
+    .stack_size = sizeof(button_task_stack),
+    .func = button_task_fn,
+    .user_data = (void*)&button_pressed,
+  };
+  task_spawn(&button_task, &button_task_params);
+
   static FATFS SDFatFS;
   static FIL SDFile;
 
@@ -87,7 +108,17 @@ void video_player_demo(void) {
   u32 next_row_offset = 0, prev_row_offset = 0, frame_deltas_offset = 0;
   u32 video_palette[8];
 
+  bool show_console = false;
   while (true) {
+    if (button_pressed) {
+      button_pressed = false;
+      show_console = !show_console;
+      struct PixelDmaBuffer* frontbuf = swap_pixel_dma_buffers();
+      struct PixelDmaBuffer* backbuf = swap_pixel_dma_buffers();
+      vga_fast_memset(frontbuf->data, 0, FRAME_WIDTH);
+      vga_fast_memset(backbuf->data, 0, FRAME_WIDTH);
+    }
+
     bool load_next_frame = false;
     if (unlikely(vga_control.entering_vblank)) {
       vga_control.entering_vblank = false;
@@ -201,8 +232,12 @@ void video_player_demo(void) {
 
     u16 vga_line = 0;
     if (unlikely(vga_take_scanline_request(&vga_line))) {
-      struct PixelDmaBuffer* backbuf = swap_pixel_dma_buffers();
-      vga_set_next_scanline(backbuf->data);
+      u32 start_time = DWT->CYCCNT;
+
+      struct PixelDmaBuffer* real_backbuf = swap_pixel_dma_buffers();
+      vga_set_next_scanline(real_backbuf->data);
+      static struct PixelDmaBuffer fake_backbuf;
+      struct PixelDmaBuffer* backbuf = show_console ? &fake_backbuf : real_backbuf;
 
       vga_fast_memset(backbuf->data, 0, FRAME_WIDTH);
       backbuf->data[0] = backbuf->data[FRAME_WIDTH - 1] = VGA_PIXEL_ALL_PINS_RESET;
@@ -220,6 +255,14 @@ void video_player_demo(void) {
         }
         ASSERT(pixel_idx <= FRAME_WIDTH);
         backbuf->data[MIN(pixel_idx, FRAME_WIDTH - 1)] = VGA_PIXEL_ALL_PINS_RESET;
+      }
+
+      u32 end_time = DWT->CYCCNT;
+      if (show_console) {
+        pixel_dma_buf_reset(real_backbuf);
+        pixel_dma_buf_set(real_backbuf, 0, VGA_PIXEL_ALL_PINS);
+        u32 len = MIN(1 + (end_time - start_time) * (FRAME_WIDTH - 1) / 6400, FRAME_WIDTH - 1);
+        pixel_dma_buf_set(real_backbuf, len, VGA_PIXEL_ALL_PINS_RESET);
       }
     }
 
