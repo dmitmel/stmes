@@ -305,7 +305,7 @@ TasksMask task_notify(struct Notification* notify) {
 }
 
 void task_wait(struct Notification* notification, Instant deadline) {
-  struct Task* task = get_current_task();
+  struct Task* task = current_task;
   // Even though there is no lock protecting these fields, and writes of 64-bit
   // ints are not even atomic on ARMv7m, it doesn't matter since their values
   // are considered valid only when the task has been put to sleep (basically,
@@ -585,7 +585,7 @@ static __NAKED void context_switch(__UNUSED enum Syscall syscall_nr) {
     // The bit 4 of EXC_RETURN determines whether the stacked state includes
     // the FPU registers, and thus whether the task has issued any FPU
     // instructions so far.
-    "tst lr, #10\n\t"
+    "tst lr, #16\n\t"
     "it eq\n\t"
     // Store the FP registers only if the floating-point context has actually
     // been used (if not, just a single cycle will be wasted stepping over this
@@ -614,7 +614,7 @@ static __NAKED void context_switch(__UNUSED enum Syscall syscall_nr) {
 #if __FPU_USED == 1
     // Reload the next task's floating-point context. See the note about
     // preserving it above.
-    "tst lr, #10\n\t"
+    "tst lr, #16\n\t"
     "it eq\n\t"
     "vldmiaeq r2!, {s16-s31}\n\t"
 #endif
