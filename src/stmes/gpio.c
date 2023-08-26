@@ -34,8 +34,7 @@ void MX_GPIO_Init(void) {
   HAL_GPIO_Init(SDIO_CD_GPIO_Port, &gpio_init);
 
   gpio_init = (GPIO_InitTypeDef){
-    .Pin =
-      GPIO_PIN_4 | GPIO_PIN_5 | GPIO_PIN_7 | GPIO_PIN_10 | GPIO_PIN_11 | GPIO_PIN_12 | GPIO_PIN_15,
+    .Pin = GPIO_PIN_4 | GPIO_PIN_5 | GPIO_PIN_7 | GPIO_PIN_10 | GPIO_PIN_15,
     .Mode = GPIO_MODE_ANALOG,
     .Pull = GPIO_NOPULL,
   };
