@@ -33,7 +33,8 @@ int main(void) {
   // console_main_loop();
   // image_viewer_demo();
   // mandelbrot_demo();
-  print_tasks_demo();
+  pong_demo();
+  // print_tasks_demo();
   // sd_card_benchmark();
   // terminal_demo();
   // video_player_demo();

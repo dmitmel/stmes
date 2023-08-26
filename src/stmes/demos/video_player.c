@@ -3,6 +3,7 @@
 #include "stmes/gpio.h"
 #include "stmes/kernel/crash.h"
 #include "stmes/sdio.h"
+#include "stmes/kernel/task.h"
 #include "stmes/utils.h"
 #include "stmes/video/framebuf.h"
 #include "stmes/video/vga.h"

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "stmes/gpio.h"
-#include "stmes/kernel/task.h"
 #include "stmes/utils.h"
 #include <stm32f4xx_hal.h>
 

@@ -1,5 +1,6 @@
 #include "stmes/demos.h"
 #include "stmes/kernel/task.h"
+#include "stmes/math.h"
 #include "stmes/utils.h"
 #include "stmes/video/console.h"
 #include "stmes/video/framebuf.h"
@@ -43,25 +44,6 @@ static u32 hsv2rgb(float hsv[3]) {
   }
   return ((u32)(r * 0xFF) << 16) | ((u32)(g * 0xFF) << 8) | ((u32)(b * 0xFF) << 0);
 }
-
-__STATIC_INLINE float lerpf(float a, float b, float t) {
-  // <https://fgiesen.wordpress.com/2012/08/15/linear-interpolation-past-present-and-future/>
-  // Complies down to just two instructions: vfms + vfma.
-  return fmaf(t, b, fmaf(-t, a, a));
-}
-
-__STATIC_INLINE float logerpf(float a, float b, float t) {
-  return a * powf(b / a, t);
-}
-
-__STATIC_INLINE float mapf(float x, float a_start, float a_end, float b_start, float b_end) {
-  return (x - a_start) / (a_end - a_start) * (b_end - b_start) + b_start;
-}
-
-__STATIC_INLINE float clampf(float x, float min, float max) {
-  return fmaxf(min, fminf(max, x));
-}
-
 static u32 lerp_rgb(u32 color1, u32 color2, float t) {
   u8 r = (u8)lerpf((u8)(color1 >> 16), (u8)(color2 >> 16), t);
   u8 g = (u8)lerpf((u8)(color1 >> 8), (u8)(color2 >> 8), t);

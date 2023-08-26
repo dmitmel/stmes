@@ -1,6 +1,7 @@
 #include "stmes/drivers/usb_host.h"
 #include "stmes/interrupts.h"
 #include "stmes/kernel/crash.h"
+#include "stmes/kernel/sync.h"
 #include "stmes/kernel/task.h"
 #include <usbh_core.h>
 #include <usbh_hid.h>
@@ -9,9 +10,25 @@ HCD_HandleTypeDef hhcd_USB_OTG_FS;
 USBH_HandleTypeDef hUsbHostFS;
 enum UsbHostState usb_host_state = USB_HOST_IDLE;
 struct Notification usb_notification;
+struct Channel usb_keyboard_events;
+
+static __attribute__((constructor)) void init_usb_channels(void) {
+  task_notify_init(&usb_notification);
+  channel_init(&usb_keyboard_events);
+}
 
 void OTG_FS_IRQHandler(void) {
   HAL_HCD_IRQHandler(&hhcd_USB_OTG_FS);
+  if (task_notify(&usb_notification)) {
+    task_yield_from_isr();
+  }
+}
+
+void USBH_HID_EventCallback(USBH_HandleTypeDef* phost) {
+  if (USBH_HID_GetDeviceType(phost) == HID_KEYBOARD) {
+    HID_KEYBD_Info_TypeDef* keyboard_info = USBH_HID_GetKeybdInfo(phost);
+    channel_send(&usb_keyboard_events, keyboard_info, sizeof(*keyboard_info));
+  }
 }
 
 static USBH_StatusTypeDef USBH_Get_USB_Status(HAL_StatusTypeDef status) {
@@ -197,6 +214,7 @@ void USBH_Delay(u32 delay) {
 }
 
 static void USBH_UserProcess(USBH_HandleTypeDef* phost, u8 id) {
+  UNUSED(phost);
   switch (id) {
     case HOST_USER_SELECT_CONFIGURATION: break;
     case HOST_USER_DISCONNECTION: usb_host_state = USB_HOST_DISCONNECT; break;

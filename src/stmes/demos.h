@@ -6,6 +6,7 @@ extern "C" {
 
 void image_viewer_demo(void);
 void mandelbrot_demo(void);
+void pong_demo(void);
 void print_tasks_demo(void);
 void sd_card_benchmark(void);
 void terminal_demo(void);

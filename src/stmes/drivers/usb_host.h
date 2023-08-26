@@ -17,6 +17,7 @@ enum UsbHostState {
 extern HCD_HandleTypeDef hhcd_USB_OTG_FS;
 extern USBH_HandleTypeDef hUsbHostFS;
 extern struct Notification usb_notification;
+extern struct Channel usb_keyboard_events;
 
 void MX_USB_HOST_Init(void);
 void MX_USB_HOST_Process(void);
