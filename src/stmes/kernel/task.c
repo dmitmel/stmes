@@ -78,7 +78,7 @@ struct Task* current_task;
 static struct TaskSchedulerState {
   struct Task *ready_queue_head, *sleeping_queue_head;
   TasksMask woken_up_tasks_mask; // must be updated atomically
-  Instant next_closest_deadline;
+  Systime next_closest_deadline;
 } scheduler_state;
 
 // The scheduler will be unlocked only after it has been started.
@@ -147,16 +147,16 @@ __STATIC_INLINE struct Task* task_queue_find_by_id(struct Task* head, TaskId id)
 // This function shouldn't be inlined: timers expire relatively rarely, and
 // since this function uses a lot of registers for local variables, inlining it
 // will make the main scheduler function push a ton of registers every time.
-static TasksMask process_task_timers(u64 now) {
+static TasksMask process_task_timers(Systime now) {
   struct TaskSchedulerState* state = &scheduler_state;
   TasksMask wake_up_mask = 0;
   struct Task* first_task = state->sleeping_queue_head;
   if (unlikely(first_task == NULL)) return wake_up_mask;
 
-  u64 closest_deadline = NO_DEADLINE;
+  Systime closest_deadline = NO_DEADLINE;
   struct Task* task = first_task;
   do {
-    Instant deadline = task->wait_deadline;
+    Systime deadline = task->wait_deadline;
     if (now >= deadline) {
       // TODO: Idk, assembling a mask for the tasks with expired timers and
       // waking them up through the common wakeup routine seems to work faster.
@@ -236,7 +236,7 @@ static void put_task_to_sleep(struct TaskSchedulerState* state, struct Task* tas
   state->sleeping_queue_head = task_queue_insert(state->sleeping_queue_head, task);
   // Re-checking all timers isn't required here, we only need to decrease the
   // closest deadline if necessary.
-  Instant deadline = task->wait_deadline;
+  Systime deadline = task->wait_deadline;
   if (deadline < state->next_closest_deadline) {
     state->next_closest_deadline = deadline;
     // TODO: hwtimer_set_alarm((u32)deadline);
@@ -262,7 +262,7 @@ struct Task* task_scheduler(enum Syscall syscall_nr, struct Task* prev_task) {
   struct Task* task;
   while (true) {
     TasksMask wake_up_mask = __atomic_exchange_n(&state->woken_up_tasks_mask, 0, __ATOMIC_RELAXED);
-    Instant now = systime_now();
+    Systime now = systime_now();
     if (likely(now >= state->next_closest_deadline)) {
       wake_up_mask |= process_task_timers(now);
     }
@@ -304,7 +304,7 @@ TasksMask task_notify(struct Notification* notify) {
   return waiters;
 }
 
-void task_wait(struct Notification* notification, Instant deadline) {
+void task_wait(struct Notification* notification, Systime deadline) {
   struct Task* task = current_task;
   // Even though there is no lock protecting these fields, and writes of 64-bit
   // ints are not even atomic on ARMv7m, it doesn't matter since their values
@@ -315,9 +315,9 @@ void task_wait(struct Notification* notification, Instant deadline) {
   syscall_0(SYSCALL_WAIT);
 }
 
-void task_sleep(u32 delay) {
-  Instant now = systime_now();
-  Instant deadline = now + delay;
+void task_sleep(u32 delay_ms) {
+  Systime now = systime_now();
+  Systime deadline = now + systime_from_millis(delay_ms);
   // TODO: Ensure minimum sleep time?
   while (now < deadline) {
     task_wait(NULL, deadline);
@@ -325,8 +325,8 @@ void task_sleep(u32 delay) {
   }
 }
 
-void task_sleep_until(Instant deadline) {
-  Instant now = systime_now();
+void task_sleep_until(Systime deadline) {
+  Systime now = systime_now();
   while (now < deadline) {
     task_wait(NULL, deadline);
     now = systime_now();

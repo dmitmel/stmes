@@ -3,10 +3,8 @@
 #include "stmes/kernel/crash.h"
 #include "stmes/kernel/task.h"
 #include <stm32f4xx_hal.h>
+#include <stm32f4xx_ll_rcc.h>
 #include <stm32f4xx_ll_tim.h>
-
-// #define HWTIMER_PRESCALER (1 << 8)
-#define HWTIMER_PRESCALER 2
 
 static TIM_HandleTypeDef hwtimer;
 
@@ -16,10 +14,16 @@ void hwtimer_init(void) {
   HAL_NVIC_SetPriority(TIM5_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(TIM5_IRQn);
 
+  u32 apb1_freq = HAL_RCC_GetPCLK1Freq() * (LL_RCC_GetAPB1Prescaler() == RCC_HCLK_DIV1 ? 1 : 2);
+  u32 hwtimer_freq = 1000 * SYSTIME_TICKS_PER_MS;
+  ASSERT(apb1_freq % hwtimer_freq == 0);
+  u32 prescaler = apb1_freq / hwtimer_freq;
+  ASSERT(prescaler - 1 <= UINT16_MAX);
+
   TIM_HandleTypeDef* htim = &hwtimer;
   htim->Instance = TIM5;
   htim->Init = (TIM_Base_InitTypeDef){
-    .Prescaler = 96000 / HWTIMER_PRESCALER,
+    .Prescaler = prescaler - 1,
     .CounterMode = TIM_COUNTERMODE_UP,
     .Period = UINT32_MAX,
     .ClockDivision = TIM_CLOCKDIVISION_DIV1,
@@ -62,17 +66,13 @@ void hwtimer_deinit(void) {
   __HAL_RCC_TIM5_CLK_DISABLE();
 }
 
-__STATIC_FORCEINLINE u32 __hwtimer_read(void) {
-  return LL_TIM_GetCounter(TIM5) / HWTIMER_PRESCALER;
-}
-
 // TODO: change to ticks
 u32 hwtimer_read(void) {
-  return __hwtimer_read();
+  return LL_TIM_GetCounter(TIM5);
 }
 
 void hwtimer_set_alarm(u32 value) {
-  LL_TIM_OC_SetCompareCH1(TIM5, value * HWTIMER_PRESCALER);
+  LL_TIM_OC_SetCompareCH1(TIM5, value);
 }
 
 void TIM5_IRQHandler(void) {
@@ -83,14 +83,14 @@ void TIM5_IRQHandler(void) {
   }
 }
 
-Instant systime_now(void) {
+Systime systime_now(void) {
   TIM_TypeDef* hwtimer = TIM5;
   u32 primask = __get_PRIMASK();
   __disable_irq();
   while (true) {
     static volatile u32 systime_epoch;
     u32 epoch = systime_epoch;
-    u32 hwtime = __hwtimer_read();
+    u32 hwtime = LL_TIM_GetCounter(hwtimer);
     // Check if the timer has overflown before calling this function or while
     // we were reading the counter values in the previous two lines.
     // TODO: Can this be safely down without establishing a critical section?
@@ -108,12 +108,8 @@ Instant systime_now(void) {
 
 // clang-format off
 HAL_StatusTypeDef HAL_InitTick(u32 priority) { UNUSED(priority); return HAL_OK; }
-u32 HAL_GetTick(void) { return __hwtimer_read(); }
+u32 HAL_GetTick(void) { return systime_as_millis(systime_now()); }
 void HAL_Delay(u32 delay) { task_sleep(delay); }
 void HAL_SuspendTick(void) {}
 void HAL_ResumeTick(void) {}
 // clang-format on
-
-void SysTick_Handler(void) {
-  // HAL_IncTick();
-}

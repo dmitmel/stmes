@@ -44,7 +44,7 @@ static void test_task_fn(__UNUSED void* user_data) {
 
     usize total_bytes = 0;
     static char buf[BLOCKSIZE * 8];
-    Instant start_time = systime_now();
+    Systime start_time = systime_now();
 
     while (true) {
       task_notify(&progress_task_notify);
@@ -73,14 +73,14 @@ static void test_task_fn(__UNUSED void* user_data) {
     task_notify(&progress_task_notify);
     task_yield();
 
-    Instant end_time = systime_now();
+    Systime end_time = systime_now();
     printf("\n");
 
-    float elapsed_seconds = (float)(u32)(end_time - start_time) / 1000.0f;
+    double elapsed_seconds = (double)(u32)systime_as_millis(end_time - start_time) / 1000;
     printf("%" PRIuPTR " %" PRIu32 "\n", total_bytes, (u32)(end_time - start_time));
-    printf("%f B/sec\n", (double)(total_bytes / elapsed_seconds));
-    printf("%f kB/sec\n", (double)((total_bytes / 1024.0f) / elapsed_seconds));
-    printf("%f MB/sec\n", (double)((total_bytes / 1024.0f / 1024.0f) / elapsed_seconds));
+    printf("%f B/sec\n", (double)total_bytes / elapsed_seconds);
+    printf("%f kB/sec\n", (double)total_bytes / 1024 / elapsed_seconds);
+    printf("%f MB/sec\n", (double)total_bytes / 1024 / 1024 / elapsed_seconds);
 
     task_sleep(2000);
     f_close(&SDFile);
@@ -89,12 +89,13 @@ static void test_task_fn(__UNUSED void* user_data) {
 
 static void progress_task_fn(__UNUSED void* user_data) {
   task_wait(&progress_task_notify, NO_DEADLINE);
-  Instant start_time = systime_now();
+  Systime start_time = systime_now();
   while (true) {
     task_wait(&progress_task_notify, NO_DEADLINE);
     console_clear_cursor_line();
     u32 percent = f_tell(&SDFile) * 100 / f_size(&SDFile);
-    printf("\r%" PRIu32 "%% %" PRIu32, percent, (u32)(systime_now() - start_time));
+    Systime elapsed_time = systime_now() - start_time;
+    printf("\r%" PRIu32 "%% %" PRIu32, percent, (u32)systime_as_millis(elapsed_time));
     task_sleep(100);
   }
 }

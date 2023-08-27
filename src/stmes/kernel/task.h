@@ -64,7 +64,7 @@ struct Task {
   TaskId id;
   TaskPriority priority;
   struct Task *next, *prev;
-  Instant wait_deadline;
+  Systime wait_deadline;
   struct Notification* wait_notification;
   u8* stack_start;
   usize stack_size;
@@ -82,9 +82,9 @@ void start_task_scheduler(void);
 struct Task* task_scheduler(enum Syscall syscall_nr, struct Task* prev_task);
 void task_notify_init(struct Notification* self);
 TasksMask task_notify(struct Notification* notification);
-void task_wait(struct Notification* notification, Instant deadline);
-void task_sleep(u32 delay);
-void task_sleep_until(Instant deadline);
+void task_wait(struct Notification* notification, Systime deadline);
+void task_sleep(u32 delay_ms);
+void task_sleep_until(Systime deadline);
 void task_join(struct Task* other_task); // TODO, requires its own syscall
 void task_spawn(struct Task* task, const struct TaskParams* params);
 usize task_stack_high_watermark(struct Task* task);
