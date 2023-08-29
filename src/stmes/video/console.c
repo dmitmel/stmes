@@ -8,8 +8,6 @@
 #include "stmes/video/vga_color.h"
 #include <printf.h>
 
-// #define CONSOLE_DEBUG
-
 // Multiplying a byte by this constant will duplicate it across the byte lanes.
 #define SMEAR_8x4 0x01010101u
 
@@ -106,11 +104,6 @@ void console_print(const char* str) {
   }
 }
 
-#ifdef CONSOLE_DEBUG
-static u32 row_timings[FRAME_HEIGHT] = { 0 };
-static usize row_timings_count = 0;
-#endif
-
 void console_setup_frame_config(void) {
   struct VgaFrameConfig frame = {
     .line_length = FRAME_WIDTH,
@@ -122,13 +115,9 @@ void console_setup_frame_config(void) {
 }
 
 // GCC_ATTRIBUTE(optimize("-Os"))
-void console_render_scanline(u16 vga_line) {
-#ifdef CONSOLE_DEBUG
-  u32 start_time = DWT->CYCCNT;
-#endif
-
+bool console_render_scanline(u16 vga_line) {
   usize y = vga_line / PIXEL_SCALE - (FRAME_HEIGHT - CONSOLE_FRAME_HEIGHT) / 2;
-  if (y >= CONSOLE_FRAME_HEIGHT) return;
+  if (y >= CONSOLE_FRAME_HEIGHT) return false;
 
   struct PixelDmaBuffer* backbuf = swap_pixel_dma_buffers();
   vga_set_next_scanline(backbuf->data);
@@ -137,7 +126,7 @@ void console_render_scanline(u16 vga_line) {
   usize x = (FRAME_WIDTH - CONSOLE_FRAME_WIDTH) / 2;
   if (char_y >= CONSOLE_FONT_HEIGHT) {
     vga_fast_memset(backbuf->data, 0, FRAME_WIDTH);
-    return;
+    return false;
   }
 
   vga_fast_memset(backbuf->data, 0, x);
@@ -242,12 +231,7 @@ void console_render_scanline(u16 vga_line) {
     }
   }
 
-#ifdef CONSOLE_DEBUG
-  u32 end_time = DWT->CYCCNT;
-  if (row_timings_count < SIZEOF(row_timings)) {
-    row_timings[row_timings_count++] = end_time - start_time;
-  }
-#endif
+  return true;
 }
 
 void console_init(void) {
@@ -256,38 +240,3 @@ void console_init(void) {
   }
   console_clear_screen();
 }
-
-#ifdef CONSOLE_DEBUG
-__NO_RETURN void console_main_loop(void) {
-  while (true) {
-    WAIT_FOR_INTERRUPT();
-
-    u16 vga_line = 0;
-    if (vga_take_scanline_request(&vga_line)) {
-      console_render_scanline(vga_line);
-    }
-
-    if (vga_control.entering_vblank) {
-      vga_control.entering_vblank = false;
-      console_setup_frame_config();
-      static u32 prev_tick;
-      u32 tick = HAL_GetTick();
-      if (tick >= prev_tick + 200) {
-        prev_tick = tick;
-        u32 min = UINT32_MAX, max = 0, sum = 0;
-        for (usize i = 0; i < SIZEOF(row_timings); i++) {
-          console_set_color(i % SIZEOF(console_palette));
-          printf("%" PRIu32 " ", row_timings[i]);
-          min = MIN(min, row_timings[i]), max = MAX(max, row_timings[i]), sum += row_timings[i];
-        }
-        console_set_color(CONSOLE_TEXT_ATTRS_RESET);
-        printf("\n");
-        printf(
-          "min: %" PRIu32 ", max: %" PRIu32 ", avg: %" PRIu32, min, max, sum / SIZEOF(row_timings)
-        );
-        row_timings_count = 0;
-      }
-    }
-  }
-}
-#endif

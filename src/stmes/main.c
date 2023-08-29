@@ -30,13 +30,13 @@ int main(void) {
   vga_apply_timings(&VGA_TIMINGS_640x480_57hz);
   vga_start();
 
-  // console_main_loop();
   // image_viewer_demo();
   // mandelbrot_demo();
-  pong_demo();
+  // pong_demo();
   // print_tasks_demo();
   // sd_card_benchmark();
   // terminal_demo();
+  text_rendering_benchmark();
   // video_player_demo();
 }
 
