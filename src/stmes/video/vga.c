@@ -59,6 +59,7 @@
 //    real-time rasterization and some assembly-level hacks.
 
 #include "stmes/video/vga.h"
+#include "stmes/drivers/dma.h"
 #include "stmes/gpio.h"
 #include "stmes/interrupts.h"
 #include "stmes/kernel/crash.h"
@@ -66,7 +67,6 @@
 #include "stmes/utils.h"
 #include <math.h>
 #include <stm32f4xx_hal.h>
-#include <stm32f4xx_ll_dma.h>
 #include <stm32f4xx_ll_gpio.h>
 #include <stm32f4xx_ll_rcc.h>
 #include <stm32f4xx_ll_tim.h>
@@ -143,7 +143,6 @@ static struct VgaState {
 } vga_state;
 
 static TIM_HandleTypeDef vga_pixel_timer, vga_hsync_timer, vga_vsync_timer;
-static DMA_HandleTypeDef vga_pixel_dma;
 
 void vga_init(void) {
   __HAL_RCC_TIM1_CLK_ENABLE();
@@ -181,13 +180,12 @@ void vga_init(void) {
     // from RAM and write to the GPIO output register. This problem is covered
     // in more detail here: <http://www.efton.sk/STM32/gotcha/g30.html> and
     // here: <https://stackoverflow.com/questions/46613053/pwm-dma-to-a-whole-gpio/46619315>.
-    DMA_HandleTypeDef* hdma = &vga_pixel_dma;
-    hdma->Instance = DMA2_Stream5;
+    DMA_Stream_TypeDef* dma = DMA2_Stream5;
     // TODO: Dynamically adjust the DMA settings to accommodate higher resolutions.
-    hdma->Init = (DMA_InitTypeDef){
+    const struct DmaConfig dma_init = {
       // Corresponds to the TIM1_UP event, for the list of all DMA streams and
       // channels see table 28 "DMA2 request mapping" of RM0383.
-      .Channel = DMA_CHANNEL_6,
+      .channel = 6,
       // Since all peripherals are memory-mapped and both (memory and
       // peripheral) ports of the DMA2 have more or less full access to the bus
       // matrix, functionally there is no distinction between reading/writing
@@ -203,23 +201,25 @@ void vga_init(void) {
       // memory port - this schizo-optimization can reliably get us up to
       // HCLK/4 (note that in that case all settings and registers relating to
       // either port need to be swapped with each other).
-      .Direction = DMA_MEMORY_TO_PERIPH,
-      .PeriphInc = DMA_PINC_DISABLE,
-      .MemInc = DMA_MINC_ENABLE,
-      .PeriphDataAlignment = DMA_PDATAALIGN_WORD,
-      .MemDataAlignment = DMA_MDATAALIGN_WORD,
-      .Mode = DMA_NORMAL,
-      .Priority = DMA_PRIORITY_HIGH,
+      .direction = DMA_MEMORY_TO_PERIPH_DIR,
+      .periph_addr_increment = false,
+      .memory_addr_increment = true,
+      .periph_data_size = DMA_WORD_DATA,
+      .memory_data_size = DMA_WORD_DATA,
+      .mode = DMA_NORMAL_MODE,
+      .priority = DMA_HIGH_PRIORITY,
       // Having FIFO on is very helpful as explained above. The FIFO settings
       // can noticeably affect signal stability (especially when the memory bus
       // is under high load) and the maximum output frequency, but further
       // experimentation is required here.
-      .FIFOMode = DMA_FIFOMODE_ENABLE,
-      .FIFOThreshold = DMA_FIFO_THRESHOLD_1QUARTERFULL,
-      .MemBurst = DMA_MBURST_SINGLE,
-      .PeriphBurst = DMA_PBURST_SINGLE,
+      .enable_fifo = true,
+      .fifo_threshold = DMA_1QUARTER_FULL_FIFO_THRESHOLD,
+      .periph_burst = DMA_BURST_SINGLE,
+      .memory_burst = DMA_BURST_SINGLE,
+      .double_buffer_mode = false,
     };
-    check_hal_error(HAL_DMA_Init(hdma));
+    dma_deinit_stream(dma);
+    dma_configure_stream(dma, &dma_init);
   }
 
   // For timer interconnections see tables 49, 53 and 56 "TIMx internal trigger
@@ -270,8 +270,6 @@ void vga_init(void) {
       .MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE,
     };
     check_hal_error(HAL_TIMEx_MasterConfigSynchronization(htim, &master_init));
-
-    __HAL_LINKDMA(&vga_pixel_timer, hdma[TIM_DMA_ID_UPDATE], vga_pixel_dma);
   }
 
   {
@@ -530,40 +528,6 @@ void vga_start(void) {
   check_hal_error(HAL_TIM_OC_Start(&vga_hsync_timer, TIM_CHANNEL_2));
 }
 
-__STATIC_FORCEINLINE void vga_stop_pixel_dma(void) {
-  // Using the registers directly is more convenient here than the LL
-  // functions and much faster than HAL.
-  DMA_TypeDef* pixel_dma_base = DMA2;
-  DMA_Stream_TypeDef* pixel_dma = DMA2_Stream5;
-  // Disable the common interrupts
-  CLEAR_BIT(pixel_dma->CR, DMA_SxCR_DMEIE | DMA_SxCR_TEIE | DMA_SxCR_HTIE | DMA_SxCR_TCIE);
-  // Disable the FIFO interrupts
-  CLEAR_BIT(pixel_dma->FCR, DMA_SxFCR_FEIE);
-  // Stop the stream
-  CLEAR_BIT(pixel_dma->CR, DMA_SxCR_EN);
-  // Confirm that the stream has been completely stopped
-  while (READ_BIT(pixel_dma->CR, DMA_SxCR_EN)) {}
-  // Additionally, flush the residual data out of the FIFO
-  CLEAR_BIT(pixel_dma->CR, DMA_SxCR_EN);
-  // Clear the interrupt flags of the stream
-  WRITE_REG(
-    pixel_dma_base->HIFCR,
-    DMA_HIFCR_CFEIF5 | DMA_HIFCR_CDMEIF5 | DMA_HIFCR_CTEIF5 | DMA_HIFCR_CHTIF5 | DMA_HIFCR_CTCIF5
-  );
-}
-
-__STATIC_FORCEINLINE void vga_start_pixel_dma(const VgaPixel* buf, u16 len) {
-  DMA_Stream_TypeDef* pixel_dma = DMA2_Stream5;
-  // Set the number of data
-  WRITE_REG(pixel_dma->NDTR, len);
-  // Set the peripheral address
-  WRITE_REG(pixel_dma->PAR, (usize)&VGA_PIXEL_GPIO_Port->BSRR);
-  // Set the memory address
-  WRITE_REG(pixel_dma->M0AR, (usize)buf);
-  // Enable the stream
-  SET_BIT(pixel_dma->CR, DMA_SxCR_EN);
-}
-
 // Triggered by the vsync timer only on the important scanlines, returns the
 // number of the next line it wants to be triggered on. The logic within this
 // function is a convoluted mess, but I tried to simplify it at least somewhat.
@@ -693,13 +657,28 @@ __STATIC_FORCEINLINE const VgaPixel* vga_fetch_next_scanline(u32 next_line_nr) {
 __STATIC_FORCEINLINE void vga_on_line_end_reached(void) {
   struct VgaState* state = &vga_state;
   TIM_TypeDef* pixel_tim = TIM1;
+  DMA_Stream_TypeDef* pixel_dma = DMA2_Stream5;
+
   // Halt the pixel timer, and thus the DMA.
   LL_TIM_DisableCounter(pixel_tim);
   // Reset all color pins, there must be no output in the blanking interval.
   LL_GPIO_ResetOutputPin(VGA_PIXEL_GPIO_Port, VGA_PIXEL_ALL_PINS);
-  vga_stop_pixel_dma();
+
+  // Disable the common DMA interrupts.
+  CLEAR_BIT(pixel_dma->CR, DMA_SxCR_DMEIE | DMA_SxCR_TEIE | DMA_SxCR_HTIE | DMA_SxCR_TCIE);
+  // Disable the FIFO interrupts.
+  CLEAR_BIT(pixel_dma->FCR, DMA_SxFCR_FEIE);
+
+  dma_disable_stream(pixel_dma);
+  // Confirm that the pixel stream has been completely stopped.
+  while (dma_is_stream_enabled(pixel_dma)) {}
+  // Additionally, flush the residual data out of the FIFO (by disabling the
+  // stream again).
+  dma_disable_stream(pixel_dma);
   // Reset the color pins again if something has been flushed out of the FIFO.
   LL_GPIO_ResetOutputPin(VGA_PIXEL_GPIO_Port, VGA_PIXEL_ALL_PINS);
+  // This must be done to be able to restart the DMA for some reason.
+  dma_clear_interrupt_flags(pixel_dma, DMA_ALL_INTERRUPT_FLAGS);
 
   TIM_TypeDef* vsync_tim = TIM9;
   u32 next_line_nr = LL_TIM_GetCounter(vsync_tim) + 1;
@@ -745,7 +724,11 @@ __STATIC_FORCEINLINE void vga_on_line_end_reached(void) {
   LL_TIM_EnableDMAReq_UPDATE(pixel_tim);
   // ..and enable the DMA stream. It will actually be started when the pixel
   // timer starts ticking at the beginning of the next line.
-  vga_start_pixel_dma(next_scanline, state->current_frame.line_length);
+  u16 line_length = state->current_frame.line_length;
+  dma_configure_transfer(
+    pixel_dma, (usize)&VGA_PIXEL_GPIO_Port->BSRR, (usize)next_scanline, line_length
+  );
+  dma_enable_stream(pixel_dma);
 }
 
 void TIM2_IRQHandler(void) {
@@ -775,12 +758,9 @@ void vga_deinit(void) {
   check_hal_error(HAL_TIM_Base_DeInit(&vga_pixel_timer));
   check_hal_error(HAL_TIM_Base_DeInit(&vga_hsync_timer));
   check_hal_error(HAL_TIM_Base_DeInit(&vga_vsync_timer));
-  // Since we are using direct register access for starting and stopping the
-  // pixel DMA, the HAL code won't know if it was actually running, so force
-  // its state, so that cleanup can be performed regardless.
-  vga_pixel_dma.State = HAL_DMA_STATE_BUSY;
-  check_hal_error(HAL_DMA_Abort(&vga_pixel_dma));
-  check_hal_error(HAL_DMA_DeInit(&vga_pixel_dma));
+
+  DMA_Stream_TypeDef* pixel_dma = DMA2_Stream5;
+  dma_deinit_stream(pixel_dma);
 
   __HAL_RCC_TIM1_CLK_DISABLE();
   __HAL_RCC_TIM2_CLK_DISABLE();

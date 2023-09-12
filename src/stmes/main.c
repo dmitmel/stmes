@@ -1,5 +1,4 @@
 #include "stmes/demos.h"
-#include "stmes/dma.h"
 #include "stmes/gpio.h"
 #include "stmes/interrupts.h"
 #include "stmes/kernel/crash.h"
@@ -23,7 +22,6 @@ int main(void) {
   console_init();
 
   gpio_init();
-  MX_DMA_Init();
   MX_SDIO_SD_Init();
 
   vga_init();
