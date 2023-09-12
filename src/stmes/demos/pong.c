@@ -26,11 +26,14 @@ static struct Task usb_task;
 static u8 keyboard_task_stack[1024] __ALIGNED(8);
 static struct Task keyboard_task;
 
-#define INPUT_UP BIT(0)
-#define INPUT_DOWN BIT(1)
-#define INPUT_RIGHT BIT(2)
-#define INPUT_LEFT BIT(3)
-#define INPUT_ESC BIT(4)
+enum {
+  INPUT_LEFT_UP = BIT(0),
+  INPUT_LEFT_DOWN = BIT(1),
+  INPUT_RIGHT_UP = BIT(2),
+  INPUT_RIGHT_DOWN = BIT(3),
+  INPUT_DEBUG = BIT(4),
+  INPUT_RESET = BIT(5),
+};
 
 struct Rect {
   float x, y, w, h, vx, vy;
@@ -42,10 +45,9 @@ static struct GameState {
   struct Rect ball, left_racket, right_racket;
 } game_state;
 
-static struct Notification frame_notify;
+static struct Notification vblank_notification;
 
-static __attribute__((constructor)) void init_game_state(void) {
-  mutex_init(&game_state.lock);
+static void reset_game_state(void) {
   struct Rect* ball = &game_state.ball;
   struct Rect* left = &game_state.left_racket;
   struct Rect* right = &game_state.right_racket;
@@ -59,11 +61,20 @@ static __attribute__((constructor)) void init_game_state(void) {
   ball->vx = 4.0f;
 }
 
+static __attribute__((constructor)) void init_game_state(void) {
+  mutex_init(&game_state.lock);
+  reset_game_state();
+}
+
 static void game_task_fn(__UNUSED void* user_data) {
   while (true) {
-    task_wait(&frame_notify, NO_DEADLINE);
+    task_wait(&vblank_notification, NO_DEADLINE);
     u32 input_state = __atomic_load_n(&game_state.input_state, __ATOMIC_RELAXED);
     mutex_lock(&game_state.lock);
+
+    if (input_state & INPUT_RESET) {
+      reset_game_state();
+    }
 
     struct Rect* ball = &game_state.ball;
     struct Rect* left = &game_state.left_racket;
@@ -78,11 +89,11 @@ static void game_task_fn(__UNUSED void* user_data) {
 
     const float racket_speed = 150 / 57.0f;
     left->vy = //
-      ((input_state & INPUT_DOWN) ? racket_speed : 0) +
-      ((input_state & INPUT_UP) ? -racket_speed : 0);
+      ((input_state & INPUT_LEFT_DOWN) ? racket_speed : 0) +
+      ((input_state & INPUT_LEFT_UP) ? -racket_speed : 0);
     right->vy = //
-      ((input_state & INPUT_RIGHT) ? racket_speed : 0) +
-      ((input_state & INPUT_LEFT) ? -racket_speed : 0);
+      ((input_state & INPUT_RIGHT_DOWN) ? racket_speed : 0) +
+      ((input_state & INPUT_RIGHT_UP) ? -racket_speed : 0);
     left->y = clampf(left->y, 0, frame_h - left->h);
     right->y = clampf(right->y, 0, frame_h - right->h);
 
@@ -156,7 +167,7 @@ static void render_task_fn(__UNUSED void* user_data) {
     if (vga_control.next_scanline_requested) {
       u16 vga_line = vga_control.next_scanline_nr;
       vga_control.next_scanline_requested = false;
-      if ((__atomic_load_n(&game_state.input_state, __ATOMIC_RELAXED) & INPUT_ESC) != 0) {
+      if (__atomic_load_n(&game_state.input_state, __ATOMIC_RELAXED) & INPUT_DEBUG) {
         console_render_scanline(vga_line);
       } else {
         struct PixelDmaBuffer* backbuf = swap_pixel_dma_buffers();
@@ -175,7 +186,7 @@ static void render_task_fn(__UNUSED void* user_data) {
     if (vga_control.entering_vblank) {
       vga_control.entering_vblank = false;
       console_setup_frame_config();
-      task_notify(&frame_notify);
+      task_notify(&vblank_notification);
     }
   }
 }
@@ -196,11 +207,12 @@ static void keyboard_task_fn(__UNUSED void* user_data) {
     u32 input_state = 0;
     for (usize i = 0; i < SIZEOF(info.keys); i++) {
       switch (info.keys[i]) {
-        case KEY_UPARROW: input_state |= INPUT_UP; break;
-        case KEY_DOWNARROW: input_state |= INPUT_DOWN; break;
-        case KEY_RIGHTARROW: input_state |= INPUT_RIGHT; break;
-        case KEY_LEFTARROW: input_state |= INPUT_LEFT; break;
-        case KEY_ESCAPE: input_state |= INPUT_ESC;
+        case KEY_UPARROW: input_state |= INPUT_LEFT_UP; break;
+        case KEY_DOWNARROW: input_state |= INPUT_LEFT_DOWN; break;
+        case KEY_RIGHTARROW: input_state |= INPUT_RIGHT_DOWN; break;
+        case KEY_LEFTARROW: input_state |= INPUT_RIGHT_UP; break;
+        case KEY_TAB: input_state |= INPUT_DEBUG; break;
+        case KEY_ESCAPE: input_state |= INPUT_RESET; break;
       }
     }
     __atomic_store_n(&game_state.input_state, input_state, __ATOMIC_RELAXED);
@@ -208,7 +220,7 @@ static void keyboard_task_fn(__UNUSED void* user_data) {
 }
 
 void pong_demo(void) {
-  task_notify_init(&frame_notify);
+  task_notify_init(&vblank_notification);
 
   struct TaskParams render_task_params = {
     .stack_start = render_task_stack,
