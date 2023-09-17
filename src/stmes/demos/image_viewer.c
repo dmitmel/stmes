@@ -73,7 +73,7 @@ void image_viewer_demo(void) {
       struct PixelDmaBuffer* backbuf = swap_pixel_dma_buffers();
       vga_set_next_scanline(backbuf->data);
 
-      backbuf->data[0] = backbuf->data[FRAME_WIDTH - 1] = VGA_PIXEL_ALL_PINS_RESET;
+      backbuf->data[0] = backbuf->data[FRAME_WIDTH - 1] = VGA_ALL_RGB_PINS_RESET;
 
       u32 video_y = vga_line / PIXEL_SCALE - (FRAME_HEIGHT - image_height) / 2;
       // video_y = (video_y + frame_counter) % video_height;
@@ -99,7 +99,7 @@ void image_viewer_demo(void) {
         }
         pixel_idx = pixel_ptr - &backbuf->data[0];
         if (pixel_idx < FRAME_WIDTH) {
-          backbuf->data[pixel_idx] = VGA_PIXEL_ALL_PINS_RESET;
+          backbuf->data[pixel_idx] = VGA_ALL_RGB_PINS_RESET;
         }
       }
     }

@@ -59,9 +59,9 @@ void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(BLTN_LED_GPIO_Port, BLTN_LED_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, VGA_PIXEL1_Pin|VGA_PIXEL2_Pin|VGA_PIXEL3_Pin|VGA_PIXEL9_Pin
-                          |VGA_PIXEL10_Pin|VGA_PIXEL11_Pin|VGA_PIXEL12_Pin|VGA_PIXEL4_Pin
-                          |VGA_PIXEL5_Pin|VGA_PIXEL6_Pin|VGA_PIXEL7_Pin|VGA_PIXEL8_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, VGA_BLUE1_Pin|VGA_BLUE2_Pin|VGA_BLUE3_Pin|VGA_RED1_Pin
+                          |VGA_RED2_Pin|VGA_RED3_Pin|VGA_RED4_Pin|VGA_BLUE4_Pin
+                          |VGA_GREEN1_Pin|VGA_GREEN2_Pin|VGA_GREEN3_Pin|VGA_GREEN4_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : PtPin */
   GPIO_InitStruct.Pin = BLTN_LED_Pin;
@@ -93,9 +93,9 @@ void MX_GPIO_Init(void)
   /*Configure GPIO pins : PBPin PBPin PBPin PBPin
                            PBPin PBPin PBPin PBPin
                            PBPin PBPin PBPin PBPin */
-  GPIO_InitStruct.Pin = VGA_PIXEL1_Pin|VGA_PIXEL2_Pin|VGA_PIXEL3_Pin|VGA_PIXEL9_Pin
-                          |VGA_PIXEL10_Pin|VGA_PIXEL11_Pin|VGA_PIXEL12_Pin|VGA_PIXEL4_Pin
-                          |VGA_PIXEL5_Pin|VGA_PIXEL6_Pin|VGA_PIXEL7_Pin|VGA_PIXEL8_Pin;
+  GPIO_InitStruct.Pin = VGA_BLUE1_Pin|VGA_BLUE2_Pin|VGA_BLUE3_Pin|VGA_RED1_Pin
+                          |VGA_RED2_Pin|VGA_RED3_Pin|VGA_RED4_Pin|VGA_BLUE4_Pin
+                          |VGA_GREEN1_Pin|VGA_GREEN2_Pin|VGA_GREEN3_Pin|VGA_GREEN4_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;

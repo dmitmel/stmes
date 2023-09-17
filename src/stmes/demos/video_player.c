@@ -240,7 +240,7 @@ void video_player_demo(void) {
       struct PixelDmaBuffer* backbuf = show_console ? &fake_backbuf : real_backbuf;
 
       vga_fast_memset(backbuf->data, 0, FRAME_WIDTH);
-      backbuf->data[0] = backbuf->data[FRAME_WIDTH - 1] = VGA_PIXEL_ALL_PINS_RESET;
+      backbuf->data[0] = backbuf->data[FRAME_WIDTH - 1] = VGA_ALL_RGB_PINS_RESET;
 
       u32 video_y = vga_line / PIXEL_SCALE - (FRAME_HEIGHT - video_height) / 2;
       if (video_y < video_height) {
@@ -254,15 +254,15 @@ void video_player_demo(void) {
           pixel_idx += repeats;
         }
         ASSERT(pixel_idx <= FRAME_WIDTH);
-        backbuf->data[MIN(pixel_idx, FRAME_WIDTH - 1)] = VGA_PIXEL_ALL_PINS_RESET;
+        backbuf->data[MIN(pixel_idx, FRAME_WIDTH - 1)] = VGA_ALL_RGB_PINS_RESET;
       }
 
       u32 end_time = DWT->CYCCNT;
       if (show_console) {
         pixel_dma_buf_reset(real_backbuf);
-        pixel_dma_buf_set(real_backbuf, 0, VGA_PIXEL_ALL_PINS);
+        pixel_dma_buf_set(real_backbuf, 0, VGA_ALL_RGB_PINS);
         u32 len = MIN(1 + (end_time - start_time) * (FRAME_WIDTH - 1) / 6400, FRAME_WIDTH - 1);
-        pixel_dma_buf_set(real_backbuf, len, VGA_PIXEL_ALL_PINS_RESET);
+        pixel_dma_buf_set(real_backbuf, len, VGA_ALL_RGB_PINS_RESET);
       }
     }
 

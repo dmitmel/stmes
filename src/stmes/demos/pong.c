@@ -173,7 +173,7 @@ static void render_task_fn(__UNUSED void* user_data) {
         struct PixelDmaBuffer* backbuf = swap_pixel_dma_buffers();
         u32 y = vga_line / PIXEL_SCALE;
         vga_set_next_scanline(backbuf->data);
-        vga_fast_memset(backbuf->data, VGA_PIXEL_ALL_PINS_RESET, FRAME_WIDTH);
+        vga_fast_memset(backbuf->data, VGA_ALL_RGB_PINS_RESET, FRAME_WIDTH);
         if (y < FRAME_HEIGHT) {
           mutex_lock(&game_state.lock);
           render_rect(backbuf->data, &game_state.ball, y, FRAME_WIDTH);
