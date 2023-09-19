@@ -582,7 +582,7 @@ static void crash_screen_mpu_diagnosis(void) {
 
 __NO_RETURN void enter_crash_screen(void) {
   // At least light up the error LED in case we crash further down below.
-  LL_GPIO_ResetOutputPin(BLTN_LED_GPIO_Port, BLTN_LED_Pin);
+  LL_GPIO_ResetOutputPin(BLTN_LED_GPIO_PORT, BLTN_LED_PIN);
 
   // Disable all interrupts with priority 1 and below (the minimum priority
   // level needs to be shifted because the lower 4 bits of the register are
@@ -693,7 +693,7 @@ __NO_RETURN void enter_crash_screen(void) {
     u32 tick = HAL_GetTick();
     if (tick - prev_tick >= BLINK_DELAY) {
       prev_tick = tick;
-      LL_GPIO_TogglePin(BLTN_LED_GPIO_Port, BLTN_LED_Pin);
+      LL_GPIO_TogglePin(BLTN_LED_GPIO_PORT, BLTN_LED_PIN);
     }
   }
 }

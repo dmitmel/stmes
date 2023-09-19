@@ -161,14 +161,14 @@ void vga_init(void) {
     // GPIOB is used for the VGA pixel color pins purely because a lot of pins
     // on this port are unoccupied by the built-in peripherals (which can't be
     // said about GPIOA).
-    LL_GPIO_ResetOutputPin(VGA_RGB_GPIO_Port, VGA_ALL_RGB_PINS);
+    LL_GPIO_ResetOutputPin(VGA_RGB_GPIO_PORT, VGA_ALL_RGB_PINS);
     GPIO_InitTypeDef gpio_init = {
       .Pin = VGA_ALL_RGB_PINS,
       .Mode = GPIO_MODE_OUTPUT_PP,
       .Pull = GPIO_NOPULL,
       .Speed = GPIO_SPEED_FREQ_VERY_HIGH, // These pins will be switching at MHz frequencies
     };
-    HAL_GPIO_Init(VGA_RGB_GPIO_Port, &gpio_init);
+    HAL_GPIO_Init(VGA_RGB_GPIO_PORT, &gpio_init);
   }
 
   {
@@ -351,7 +351,7 @@ void vga_init(void) {
     // default for PWM channels.
 
     GPIO_InitTypeDef gpio_init = {
-      .Pin = VGA_HSYNC_Pin,
+      .Pin = VGA_HSYNC_PIN,
       .Mode = GPIO_MODE_AF_PP,
       .Pull = GPIO_NOPULL,
       // Even at the highest resolution video modes supported by VGA this pin
@@ -362,7 +362,7 @@ void vga_init(void) {
       .Speed = GPIO_SPEED_FREQ_LOW,
       .Alternate = GPIO_AF1_TIM2,
     };
-    HAL_GPIO_Init(VGA_HSYNC_GPIO_Port, &gpio_init);
+    HAL_GPIO_Init(VGA_HSYNC_GPIO_PORT, &gpio_init);
   }
 
   {
@@ -419,14 +419,14 @@ void vga_init(void) {
     check_hal_error(HAL_TIM_PWM_ConfigChannel(htim, &channel2_init, TIM_CHANNEL_2));
 
     GPIO_InitTypeDef gpio_init = {
-      .Pin = VGA_VSYNC_Pin,
+      .Pin = VGA_VSYNC_PIN,
       .Mode = GPIO_MODE_AF_PP,
       .Pull = GPIO_NOPULL,
       // The duration of the pulse can be expressed at most in kHz frequencies.
       .Speed = GPIO_SPEED_FREQ_LOW,
       .Alternate = GPIO_AF3_TIM9,
     };
-    HAL_GPIO_Init(VGA_VSYNC_GPIO_Port, &gpio_init);
+    HAL_GPIO_Init(VGA_VSYNC_GPIO_PORT, &gpio_init);
   }
 }
 
@@ -662,7 +662,7 @@ __STATIC_FORCEINLINE void vga_on_line_end_reached(void) {
   // Halt the pixel timer, and thus the DMA.
   LL_TIM_DisableCounter(pixel_tim);
   // Reset all color pins, there must be no output in the blanking interval.
-  LL_GPIO_ResetOutputPin(VGA_RGB_GPIO_Port, VGA_ALL_RGB_PINS);
+  LL_GPIO_ResetOutputPin(VGA_RGB_GPIO_PORT, VGA_ALL_RGB_PINS);
 
   // Disable the common DMA interrupts.
   CLEAR_BIT(pixel_dma->CR, DMA_SxCR_DMEIE | DMA_SxCR_TEIE | DMA_SxCR_HTIE | DMA_SxCR_TCIE);
@@ -676,7 +676,7 @@ __STATIC_FORCEINLINE void vga_on_line_end_reached(void) {
   // stream again).
   dma_disable_stream(pixel_dma);
   // Reset the color pins again if something has been flushed out of the FIFO.
-  LL_GPIO_ResetOutputPin(VGA_RGB_GPIO_Port, VGA_ALL_RGB_PINS);
+  LL_GPIO_ResetOutputPin(VGA_RGB_GPIO_PORT, VGA_ALL_RGB_PINS);
   // This must be done to be able to restart the DMA for some reason.
   dma_clear_interrupt_flags(pixel_dma, DMA_ALL_INTERRUPT_FLAGS);
 
@@ -726,7 +726,7 @@ __STATIC_FORCEINLINE void vga_on_line_end_reached(void) {
   // timer starts ticking at the beginning of the next line.
   u16 line_length = state->current_frame.line_length;
   dma_configure_transfer(
-    pixel_dma, (usize)&VGA_RGB_GPIO_Port->BSRR, (usize)next_scanline, line_length
+    pixel_dma, (usize)&VGA_RGB_GPIO_PORT->BSRR, (usize)next_scanline, line_length
   );
   dma_enable_stream(pixel_dma);
 }

@@ -66,13 +66,13 @@ void HAL_SD_MspInit(SD_HandleTypeDef* hsd) {
       .Speed = GPIO_SPEED_FREQ_VERY_HIGH,
       .Alternate = GPIO_AF12_SDIO,
     };
-    gpio_init.Pin = SDIO_CLK_Pin;
+    gpio_init.Pin = SDIO_CLK_PIN;
     HAL_GPIO_Init(GPIOB, &gpio_init);
 
     gpio_init.Pull = GPIO_PULLUP;
-    gpio_init.Pin = SDIO_D1_Pin | SDIO_D2_Pin | SDIO_CMD_Pin;
+    gpio_init.Pin = SDIO_D1_PIN | SDIO_D2_PIN | SDIO_CMD_PIN;
     HAL_GPIO_Init(GPIOA, &gpio_init);
-    gpio_init.Pin = SDIO_D0_Pin | SDIO_D3_Pin;
+    gpio_init.Pin = SDIO_D0_PIN | SDIO_D3_PIN;
     HAL_GPIO_Init(GPIOB, &gpio_init);
 
     hdma_sdio_rx.Instance = DMA2_Stream3;
@@ -123,8 +123,8 @@ void HAL_SD_MspInit(SD_HandleTypeDef* hsd) {
 void HAL_SD_MspDeInit(SD_HandleTypeDef* hsd) {
   if (hsd->Instance == SDIO) {
     __HAL_RCC_SDIO_CLK_DISABLE();
-    HAL_GPIO_DeInit(GPIOA, SDIO_CMD_Pin | SDIO_D1_Pin | SDIO_D2_Pin);
-    HAL_GPIO_DeInit(GPIOB, SDIO_CLK_Pin | SDIO_D0_Pin | SDIO_D3_Pin);
+    HAL_GPIO_DeInit(GPIOA, SDIO_CMD_PIN | SDIO_D1_PIN | SDIO_D2_PIN);
+    HAL_GPIO_DeInit(GPIOB, SDIO_CLK_PIN | SDIO_D0_PIN | SDIO_D3_PIN);
   }
 }
 
@@ -156,7 +156,7 @@ HAL_StatusTypeDef BSP_SD_Init(void) {
 }
 
 bool BSP_SD_IsDetected(void) {
-  return HAL_GPIO_ReadPin(SDIO_CD_GPIO_Port, SDIO_CD_Pin) == GPIO_PIN_RESET;
+  return HAL_GPIO_ReadPin(SDIO_CD_GPIO_PORT, SDIO_CD_PIN) == GPIO_PIN_RESET;
 }
 
 // Some constants that aren't defined in the HAL headers:

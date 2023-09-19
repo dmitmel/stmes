@@ -17,7 +17,7 @@ static void button_task_fn(void* user_data) {
   while (true) {
     task_wait(&gpio_button_notification, NO_DEADLINE);
     task_sleep(20);
-    *button_pressed = LL_GPIO_IsInputPinSet(BLTN_KEY_GPIO_Port, BLTN_KEY_Pin);
+    *button_pressed = LL_GPIO_IsInputPinSet(BLTN_KEY_GPIO_PORT, BLTN_KEY_PIN);
   }
 }
 
