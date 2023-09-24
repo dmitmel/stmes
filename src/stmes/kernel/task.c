@@ -642,77 +642,82 @@ __NAKED void PendSV_Handler(void) {
 }
 
 __NAKED void SVC_Handler(void) {
-  // NOTE on the syscall ABI: the low callee-saved registers r4-r6 are used for
-  // the syscall parameters and r7 is used for the syscall number, the syscalls
-  // themselves should be performed with the `SVC #0` instruction. There are
-  // two main reasons driving this decision:
+  // NOTE: On the syscall ABI: the low callee-saved registers r4-r7 are used
+  // for the syscall parameters, and the syscall number is embedded into the
+  // immediate parameter of the `SVC` instruction. The main reason driving the
+  // choice of the registers is that the caller-saved registers (such as r0-r3)
+  // can't be used due to how interrupts on Cortex-M interact with the calling
+  // convention.
   //
-  // 1. Having the syscall number embedded in the immediate parameter of the
-  //    SVC instruction looks pretty, but requires a bunch of instructions to
-  //    decode: first you need to figure out which stack the caller was using
-  //    (PSP or MSP), load the PC from the stacked context, and then load a
-  //    halfword from memory with the instruction's immediate. Using a register
-  //    for this is simply more efficient, even though the caller has to add a
-  //    `MOVS r7, #X` instruction on their side.
-  //
-  // 2. The caller-saved registers (such as r0-r3) can't be used due to how
-  //    interrupts on Cortex-M interact with the calling convention. Suppose an
-  //    SVC instruction is issued by the application, and during the stacking
-  //    process a higher-priority (in other words: any) interrupt arrives. The
-  //    CPU will handle it first, and tail-chain the SVCall exception handler
-  //    without pushing any more context on the stack, which is perfectly safe
-  //    as long as everyone respects the calling convention. However, ISRs are
-  //    free to contaminate the caller-saved registers (r0-r3 and r12) since
-  //    all of them are on the stack and will be restored by the hardware.
-  //    However, for us this means that if we were to use r0-r3 for syscall
-  //    parameters, an early-arriving interrupt could clobber them all. Of
-  //    course, we could just load the values of r0-r3 from the stack, but that
-  //    is additional work as evidenced by the first point. In contrast, since
-  //    the software is responsible for restoring r4-r11 at the end of every
-  //    function, even if this exception gets tail-chained, the register values
-  //    will be those at the point of the `SVC` instruction.
+  // Suppose an SVC instruction is issued by the application, and during the
+  // stacking process a higher-priority (in other words: any) interrupt
+  // arrives. The CPU will handle it first, and tail-chain the SVCall exception
+  // handler without pushing any more context on the stack, which is perfectly
+  // safe as long as everyone respects the calling convention. However, ISRs
+  // are free to contaminate the caller-saved registers (r0-r3 and r12) since
+  // all of them are on the stack and will be restored by the hardware.
+  // However, for us this means that if we were to use r0-r3 for syscall
+  // parameters, an early-arriving interrupt could clobber them all. Of course,
+  // we could just load the values of r0-r3 from the stack, but that is
+  // additional work. In contrast, since the software is responsible for
+  // restoring r4-r11 at the end of every function, even if this exception gets
+  // tail-chained, the register values will be those at the point of the `SVC`
+  // instruction.
 
   __ASM volatile( //
-    // Move the syscall number into the first argument register, for the
+    // The bit 2 of LR specifies which stack was in use prior to entering the
+    // interrupt. Use it to figure out whether the caller was using MSP or PSP.
+    "tst lr, #4\n\t"
+    "ite eq\n\t"
+    "mrseq r0, msp\n\t" // if (LR & 4) == 0
+    "mrsne r0, psp\n\t" // if (LR & 4) != 0
+    // Load the PC from the stacked context.
+    "ldr r0, [r0, #24]\n\t"
+    // Load a halfword from memory with the instruction's immediate, which is
+    // the syscall number. Put it into the first argument register, for the
     // purposes of the shortcuts below.
-    "mov r0, r7\n\t"
+    "ldrb r0, [r0, #-2]\n\t"
+
     // A shortcut for the WAIT syscall, which is invoked really frequently.
-    "cmp r7, %[SYSCALL_WAIT]\n\t"
+    "cmp r0, %[SYSCALL_WAIT]\n\t"
     // Jump to the context switcher immediately if the syscall number matches.
     "beq %[context_switch]\n\t"
     // It is also worthwhile to have a shortcut for the YIELD syscall, which is
     // also invoked very often.
-    "cmp r7, %[SYSCALL_YIELD]\n\t"
+    "cmp r0, %[SYSCALL_YIELD]\n\t"
     "beq %[context_switch]\n\t"
 
-    // The normal syscall entry path. Save the LR before calling the handler.
-    "push {r4, lr}\n\t"
+    // The normal syscall entry path. Save the LR and the syscall number before
+    // calling the handler.
+    "push {r0, lr}\n\t"
 #ifdef __PLATFORMIO_BUILD_DEBUG__
     ".cfi_adjust_cfa_offset 8\n\t"
-    ".cfi_rel_offset r4, 0\n\t"
+    ".cfi_rel_offset r0, 0\n\t"
     ".cfi_rel_offset lr, 4\n\t"
 #endif
 
+    // TODO: Support the 4th argument in r7. This requires writing out the
+    // assembly for putting the 5th argument of a function on the stack, plus
+    // the corresponding CFI directives.
+
     // First, translate the argument registers from the syscall ABI into the
     // normal C calling convention.
+    "mov r3, r0\n\t"
     "mov r0, r4\n\t"
     "mov r1, r5\n\t"
     "mov r2, r6\n\t"
-    "mov r3, r7\n\t"
     // And jump into the generic syscall handler.
     "bl %[syscall_handler_entry]\n\t"
 
-    // Restore the LR.
-    "pop {r4, lr}\n\t"
+    // Restore the LR and the syscall number, loading it into the first
+    // argument register.
+    "pop {r0, lr}\n\t"
 #ifdef __PLATFORMIO_BUILD_DEBUG__
     ".cfi_adjust_cfa_offset -8\n\t"
-    ".cfi_restore r4\n\t"
+    ".cfi_restore r0\n\t"
     ".cfi_restore lr\n\t"
 #endif
 
-    // Move the syscall number argument again from r7 (that register wouldn't
-    // have been changed across the function calls).
-    "mov r0, r7\n\t"
     // Afterwards, jump into the context switcher.
     "b %[context_switch]" :: //
 

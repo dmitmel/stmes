@@ -20,23 +20,27 @@ enum Syscall {
 // The system call ABI is described in the implementation file.
 
 __STATIC_FORCEINLINE void syscall_0(enum Syscall nr) {
-  register usize r7 __ASM("r7") = nr;
-  __ASM volatile("svc #0" ::"r"(r7) : "memory");
+  __ASM volatile("svc %0" ::"n"(nr) : "memory");
 }
 
 __STATIC_FORCEINLINE void syscall_1(enum Syscall nr, usize a) {
-  register usize r7 __ASM("r7") = nr, r4 __ASM("r4") = a;
-  __ASM volatile("svc #0" ::"r"(r7), "r"(r4) : "memory");
+  register usize r4 __ASM("r4") = a;
+  __ASM volatile("svc %0" ::"n"(nr), "r"(r4) : "memory");
 }
 
 __STATIC_FORCEINLINE void syscall_2(enum Syscall nr, usize a, usize b) {
-  register usize r7 __ASM("r7") = nr, r4 __ASM("r4") = a, r5 __ASM("r5") = b;
-  __ASM volatile("svc #0" ::"r"(r7), "r"(r4), "r"(r5) : "memory");
+  register usize r4 __ASM("r4") = a, r5 __ASM("r5") = b;
+  __ASM volatile("svc %0" ::"n"(nr), "r"(r4), "r"(r5) : "memory");
 }
 
 __STATIC_FORCEINLINE void syscall_3(enum Syscall nr, usize a, usize b, usize c) {
-  register usize r7 __ASM("r7") = nr, r4 __ASM("r4") = a, r5 __ASM("r5") = b, r6 __ASM("r6") = c;
-  __ASM volatile("svc #0" ::"r"(r7), "r"(r4), "r"(r5), "r"(r6) : "memory");
+  register usize r4 __ASM("r4") = a, r5 __ASM("r5") = b, r6 __ASM("r6") = c;
+  __ASM volatile("svc %0" ::"n"(nr), "r"(r4), "r"(r5), "r"(r6) : "memory");
+}
+
+__STATIC_FORCEINLINE void syscall_4(enum Syscall nr, usize a, usize b, usize c, usize d) {
+  register usize r4 __ASM("r4") = a, r5 __ASM("r5") = b, r6 __ASM("r6") = c, r7 __ASM("r7") = d;
+  __ASM volatile("svc %0" ::"n"(nr), "r"(r4), "r"(r5), "r"(r6), "r"(r7) : "memory");
 }
 
 typedef u8 TaskId;
