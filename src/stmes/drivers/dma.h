@@ -54,27 +54,27 @@ struct DmaConfig {
     memory_burst : 2;
 };
 
-#define DMA_FLAG_FEIF BIT(0)
-#define DMA_FLAG_DMEIF BIT(2)
-#define DMA_FLAG_TEIF BIT(3)
-#define DMA_FLAG_HTIF BIT(4)
-#define DMA_FLAG_TCIF BIT(5)
+#define DMA_FLAG_FEIF BIT(0)  // FIFO error
+#define DMA_FLAG_DMEIF BIT(2) // Direct mode error
+#define DMA_FLAG_TEIF BIT(3)  // Transfer error
+#define DMA_FLAG_HTIF BIT(4)  // Transfer half-complete
+#define DMA_FLAG_TCIF BIT(5)  // Transfer complete
 #define DMA_ALL_INTERRUPT_FLAGS \
   (DMA_FLAG_FEIF | DMA_FLAG_DMEIF | DMA_FLAG_TEIF | DMA_FLAG_HTIF | DMA_FLAG_TCIF)
 
-__STATIC_FORCEINLINE DMA_TypeDef* dma_get_base_registers(DMA_Stream_TypeDef* dma) {
+__STATIC_FORCEINLINE DMA_TypeDef* dma_get_base_registers(const DMA_Stream_TypeDef* dma) {
   // RM0383 section 2.3 "Memory map"
   // <https://github.com/STMicroelectronics/STM32CubeF4/blob/v1.27.1/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_dma.c#L1201>
   return (DMA_TypeDef*)((usize)dma & ~0x3FF);
 }
 
-__STATIC_FORCEINLINE usize dma_get_stream_index(DMA_Stream_TypeDef* dma) {
+__STATIC_FORCEINLINE usize dma_get_stream_index(const DMA_Stream_TypeDef* dma) {
   // RM0383 section 9.5.11 "DMA register map"
   // <https://github.com/STMicroelectronics/STM32CubeF4/blob/v1.27.1/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_dma.c#L1187>
   return (((usize)dma & 0xFF) - sizeof(DMA_TypeDef)) / sizeof(DMA_Stream_TypeDef);
 }
 
-__STATIC_FORCEINLINE u32 dma_get_interrupt_flags(DMA_Stream_TypeDef* dma) {
+__STATIC_FORCEINLINE u32 dma_get_interrupt_flags(const DMA_Stream_TypeDef* dma) {
   DMA_TypeDef* base = dma_get_base_registers(dma);
   usize idx = dma_get_stream_index(dma);
   static const u8 flags_offset[] = { 0, 6, 16, 22 };

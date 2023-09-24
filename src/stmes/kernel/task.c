@@ -1,8 +1,8 @@
-// The central component of my improvised nanokernel - a preemptive task
-// scheduler with a round-robin scheduling policy. Implemented in a more or
-// less conventional manner of writing RTOSes for Cortex-M CPUs, it utilizes
-// the SVCall interrupt for making syscalls and the PendSV one for preemptively
-// entering the scheduler.
+// The heart of my improvised nanokernel - a preemptive task scheduler with a
+// round-robin scheduling policy. Implemented in a more or less conventional
+// manner of writing RTOSes for Cortex-M CPUs, it utilizes the SVCall interrupt
+// for making syscalls and the PendSV one for preemptively entering the
+// scheduler.
 //
 // Context switching is performed with the help of hardware: on exception entry
 // the CPU pushes a subset of registers onto the stack, which we complement by

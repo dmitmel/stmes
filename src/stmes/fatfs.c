@@ -1,23 +1,20 @@
 #include "stmes/fatfs.h"
+#include "stmes/drivers/sdmmc.h"
 #include "stmes/kernel/crash.h"
 #include "stmes/kernel/sync.h"
-#include "stmes/kernel/task.h"
-#include "stmes/sdio.h"
 #include "stmes/utils.h"
 #include <ff.h>
 #include <printf.h>
 #include <stm32f4xx_hal.h>
+#include <stm32f4xx_ll_sdmmc.h>
 
 #include <diskio.h>
 
 #define SD_TIMEOUT 1000
-#define SD_DEFAULT_BLOCK_SIZE 512
 
-static u8 dma_scratch[BLOCKSIZE] __ALIGNED(4);
+static u8 dma_scratch[SDMMC_BLOCK_SIZE] __ALIGNED(4);
 
 static volatile DSTATUS sd_status = STA_NOINIT;
-static volatile bool sd_write_done = false, sd_read_done = false;
-// static struct Notification sd_notify;
 
 void* ff_memalloc(UINT msize) {
   return ff_malloc(msize);
@@ -28,6 +25,7 @@ void ff_memfree(void* mblock) {
 }
 
 int ff_cre_syncobj(BYTE volume, struct Mutex** mutex) {
+  ASSERT(volume < _VOLUMES);
   static struct Mutex ff_mutexes[_VOLUMES];
   *mutex = &ff_mutexes[volume];
   mutex_init(*mutex);
@@ -48,35 +46,21 @@ void ff_rel_grant(struct Mutex* mutex) {
   mutex_unlock(mutex);
 }
 
-static HAL_StatusTypeDef sd_wait_for_card_state(HAL_SD_CardStateTypedef state, u32 timeout) {
-  u32 start_time = HAL_GetTick();
+static HAL_StatusTypeDef sd_wait_for_card_state(enum SdmmcCardState state, Systime deadline) {
   do {
-    if (HAL_SD_GetCardState(&hsd) == state) {
-      return HAL_OK;
-    }
-    // task_yield();
-  } while (HAL_GetTick() - start_time < timeout);
-  return HAL_TIMEOUT;
-}
-
-static HAL_StatusTypeDef sd_wait_until_flag_set(volatile bool* flag, u32 timeout) {
-  // TODO: Using notifications instead of a busy loop is apparently slower. Investigate why.
-  // Instant deadline = systime_now() + timeout;
-  u32 start_time = HAL_GetTick();
-  do {
-    // task_wait(&sd_notify, deadline);
-    if (*flag != false) {
-      return HAL_OK;
-    }
-    // task_yield();
-  } while (HAL_GetTick() - start_time < timeout);
-  // } while (systime_now() < deadline);
+    union SdmmcCSR card_status;
+    if (sdmmc_get_card_status(&card_status) != SDMMC_ERROR_NONE) return HAL_ERROR;
+    if (card_status.bits.current_state == state) return HAL_OK;
+    task_yield();
+  } while (systime_now() < deadline);
   return HAL_TIMEOUT;
 }
 
 static DSTATUS sd_check_status(void) {
   sd_status = STA_NOINIT;
-  if (HAL_SD_GetCardState(&hsd) == HAL_SD_CARD_TRANSFER) {
+  union SdmmcCSR card_status;
+  u32 err = sdmmc_get_card_status(&card_status);
+  if (err == SDMMC_ERROR_NONE && card_status.bits.current_state == SDMMC_STATE_TRANSFER) {
     sd_status &= ~STA_NOINIT;
   }
   return sd_status;
@@ -85,7 +69,12 @@ static DSTATUS sd_check_status(void) {
 DSTATUS disk_initialize(BYTE pdrv) {
   UNUSED(pdrv);
   sd_status = STA_NOINIT;
-  if (BSP_SD_Init() == HAL_OK) {
+  sdmmc_init_gpio();
+  const struct SdmmcHostCapabilities capabilities = {
+    .high_speed_mode = true,
+    .use_4bit_data_bus = true,
+  };
+  if (sdmmc_init_card(&capabilities) == SDMMC_ERROR_NONE) {
     sd_status = sd_check_status();
   }
   return sd_status;
@@ -96,95 +85,78 @@ DSTATUS disk_status(BYTE pdrv) {
   return sd_check_status();
 }
 
-__STATIC_INLINE HAL_StatusTypeDef sd_read_aligned(u8* buf, u32 sector, u32 count) {
-  HAL_StatusTypeDef res;
-  sd_read_done = false;
-  if ((res = HAL_SD_ReadBlocks_DMA(&hsd, buf, sector, count)) != HAL_OK) return res;
-  if ((res = sd_wait_until_flag_set(&sd_read_done, SD_TIMEOUT)) != HAL_OK) return res;
-  sd_read_done = false;
-  return HAL_OK;
-}
-
-DRESULT disk_read(BYTE pdrv, BYTE* buff, DWORD sector, UINT count) {
+DRESULT disk_read(BYTE pdrv, BYTE* buffer, DWORD sector, UINT count) {
   UNUSED(pdrv);
-  if (sd_wait_for_card_state(HAL_SD_CARD_TRANSFER, SD_TIMEOUT) != HAL_OK) {
-    return RES_ERROR;
-  }
+  Systime deadline = timeout_to_deadline(SD_TIMEOUT);
+  if (sd_wait_for_card_state(SDMMC_STATE_TRANSFER, deadline) != HAL_OK) return RES_ERROR;
 
   // Take the fast path if the output buffer is 4-byte aligned
-  if ((usize)buff % 4 == 0) {
-    if (sd_read_aligned(buff, sector, count) != HAL_OK) return RES_ERROR;
-    if (sd_wait_for_card_state(HAL_SD_CARD_TRANSFER, SD_TIMEOUT) != HAL_OK) return RES_ERROR;
+  if ((usize)buffer % 4 == 0) {
+    if (sdmmc_read(buffer, sector, count, deadline) != HAL_OK) return RES_ERROR;
+    if (sd_wait_for_card_state(SDMMC_STATE_TRANSFER, deadline) != HAL_OK) return RES_ERROR;
     return RES_OK;
   }
 
   // Otherwise, fetch each sector to an aligned buffer and copy it to the destination
   for (UINT last = sector + count; sector < last; sector++) {
-    if (sd_read_aligned(dma_scratch, sector, 1) != HAL_OK) return RES_ERROR;
-    fast_memcpy_u8(buff, dma_scratch, BLOCKSIZE);
-    buff += BLOCKSIZE;
+    if (sdmmc_read(dma_scratch, sector, 1, deadline) != HAL_OK) return RES_ERROR;
+    fast_memcpy_u8(buffer, dma_scratch, SDMMC_BLOCK_SIZE);
+    buffer += SDMMC_BLOCK_SIZE;
   }
+  if (sd_wait_for_card_state(SDMMC_STATE_TRANSFER, deadline) != HAL_OK) return RES_ERROR;
   return RES_OK;
 }
 
-__STATIC_INLINE HAL_StatusTypeDef sd_write_aligned(const u8* buf, u32 sector, u32 count) {
-  HAL_StatusTypeDef res;
-  sd_write_done = false;
-  if ((res = HAL_SD_WriteBlocks_DMA(&hsd, (u8*)buf, sector, count)) != HAL_OK) return res;
-  if ((res = sd_wait_until_flag_set(&sd_write_done, SD_TIMEOUT)) != HAL_OK) return res;
-  sd_write_done = false;
-  return HAL_OK;
-}
-
-DRESULT disk_write(BYTE pdrv, const BYTE* buff, DWORD sector, UINT count) {
+DRESULT disk_write(BYTE pdrv, const BYTE* buffer, DWORD sector, UINT count) {
   UNUSED(pdrv);
-  if (sd_wait_for_card_state(HAL_SD_CARD_TRANSFER, SD_TIMEOUT) != HAL_OK) {
-    return RES_ERROR;
-  }
+  Systime deadline = timeout_to_deadline(SD_TIMEOUT);
+  if (sd_wait_for_card_state(SDMMC_STATE_TRANSFER, deadline) != HAL_OK) return RES_ERROR;
 
   // Take the fast path if the output buffer is 4-byte aligned
-  if ((usize)buff % 4 == 0) {
-    if (sd_write_aligned(buff, sector, count) != HAL_OK) return RES_ERROR;
-    if (sd_wait_for_card_state(HAL_SD_CARD_TRANSFER, SD_TIMEOUT) != HAL_OK) return RES_ERROR;
+  if ((usize)buffer % 4 == 0) {
+    if (sdmmc_write(buffer, sector, count, deadline) != HAL_OK) return RES_ERROR;
+    if (sd_wait_for_card_state(SDMMC_STATE_TRANSFER, deadline) != HAL_OK) return RES_ERROR;
     return RES_OK;
   }
 
   // Otherwise, copy each sector to an aligned buffer and write it
   for (UINT last = sector + count; sector < last; sector++) {
-    fast_memcpy_u8(dma_scratch, buff, BLOCKSIZE);
-    buff += BLOCKSIZE;
-    if (sd_write_aligned(dma_scratch, sector, 1) != HAL_OK) return RES_ERROR;
+    fast_memcpy_u8(dma_scratch, buffer, SDMMC_BLOCK_SIZE);
+    buffer += SDMMC_BLOCK_SIZE;
+    if (sdmmc_write(dma_scratch, sector, 1, deadline) != HAL_OK) return RES_ERROR;
   }
+  if (sd_wait_for_card_state(SDMMC_STATE_TRANSFER, deadline) != HAL_OK) return RES_ERROR;
   return RES_OK;
 }
 
-DRESULT disk_ioctl(BYTE pdrv, BYTE cmd, void* buff) {
+DRESULT disk_ioctl(BYTE pdrv, BYTE cmd, void* out) {
   UNUSED(pdrv);
   if (sd_status & STA_NOINIT) return RES_NOTRDY;
   switch (cmd) {
     case CTRL_SYNC: {
-      if (sd_wait_for_card_state(HAL_SD_CARD_TRANSFER, SD_TIMEOUT) != HAL_OK) {
-        return RES_ERROR;
-      }
+      Systime deadline = timeout_to_deadline(SD_TIMEOUT);
+      if (sd_wait_for_card_state(SDMMC_STATE_TRANSFER, deadline) != HAL_OK) return RES_ERROR;
       return RES_OK;
     }
     case GET_SECTOR_COUNT: {
-      *(DWORD*)buff = hsd.SdCard.LogBlockNbr;
+      *(DWORD*)out = sdmmc_get_blocks_count(sdmmc_get_card());
       return RES_OK;
     }
     case GET_SECTOR_SIZE: {
-      *(WORD*)buff = hsd.SdCard.LogBlockSize;
+      *(WORD*)out = SDMMC_BLOCK_SIZE;
       return RES_OK;
     }
     case GET_BLOCK_SIZE: {
-      *(DWORD*)buff = hsd.SdCard.LogBlockSize / SD_DEFAULT_BLOCK_SIZE;
+      *(DWORD*)out = sdmmc_get_eraseable_sector_size(sdmmc_get_card());
       return RES_OK;
     }
     case CTRL_TRIM: {
-      DWORD start = ((DWORD*)buff)[0], end = ((DWORD*)buff)[1];
-      if (HAL_SD_Erase(&hsd, start, end) != HAL_OK) {
-        return RES_ERROR;
-      }
+      DWORD start = ((DWORD*)out)[0], end = ((DWORD*)out)[1];
+      // TODO: Erasing may take a very long time, calculate the timeout.
+      Systime deadline = timeout_to_deadline(NO_DEADLINE);
+      if (sd_wait_for_card_state(SDMMC_STATE_TRANSFER, deadline) != HAL_OK) return RES_ERROR;
+      if (sdmmc_erase(start, end, deadline) != HAL_OK) return RES_ERROR;
+      if (sd_wait_for_card_state(SDMMC_STATE_TRANSFER, deadline) != HAL_OK) return RES_ERROR;
       return RES_OK;
     }
     default: {
@@ -195,26 +167,6 @@ DRESULT disk_ioctl(BYTE pdrv, BYTE cmd, void* buff) {
 
 DWORD get_fattime(void) {
   return 0;
-}
-
-void HAL_SD_TxCpltCallback(SD_HandleTypeDef* hsd) {
-  UNUSED(hsd);
-  sd_write_done = true;
-  // task_notify(&sd_notify);
-}
-
-void HAL_SD_RxCpltCallback(SD_HandleTypeDef* hsd) {
-  UNUSED(hsd);
-  sd_read_done = true;
-  // task_notify(&sd_notify);
-}
-
-void HAL_SD_AbortCallback(SD_HandleTypeDef* hsd) {
-  UNUSED(hsd);
-}
-
-void HAL_SD_ErrorCallback(SD_HandleTypeDef* hsd) {
-  UNUSED(hsd);
 }
 
 __NO_RETURN void crash_on_fs_error(FRESULT code, const char* file, u32 line) {

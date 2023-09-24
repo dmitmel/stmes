@@ -17,13 +17,13 @@ __NO_RETURN void crash(const char* message, const char* src_file, u32 src_line);
 
 __NO_RETURN void crash_on_hal_error(HAL_StatusTypeDef code, const char* file, u32 line);
 
-#define check_hal_error(expr)                       \
-  do {                                              \
-    HAL_StatusTypeDef code = (expr);                \
-    if (unlikely(code != HAL_OK)) {                 \
-      crash_collect_registers();                    \
-      crash_on_hal_error(code, __FILE__, __LINE__); \
-    }                                               \
+#define check_hal_error(expr)                           \
+  do {                                                  \
+    HAL_StatusTypeDef __code__ = (expr);                \
+    if (unlikely(__code__ != HAL_OK)) {                 \
+      crash_collect_registers();                        \
+      crash_on_hal_error(__code__, __FILE__, __LINE__); \
+    }                                                   \
   } while (0)
 
 __NO_RETURN void enter_crash_screen(void);

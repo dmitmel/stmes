@@ -1,14 +1,15 @@
 #include "stmes/demos.h"
+#include "stmes/drivers/sdmmc.h"
 #include "stmes/fatfs.h"
 #include "stmes/gpio.h"
 #include "stmes/kernel/crash.h"
-#include "stmes/sdio.h"
 #include "stmes/kernel/task.h"
 #include "stmes/utils.h"
 #include "stmes/video/framebuf.h"
 #include "stmes/video/vga.h"
 #include "stmes/video/vga_color.h"
 #include <ff.h>
+#include <stdlib.h>
 #include <stm32f4xx_hal.h>
 #include <stm32f4xx_ll_gpio.h>
 
@@ -22,7 +23,7 @@ static void button_task_fn(void* user_data) {
 }
 
 struct BufferedReader {
-  u8 buffer[BLOCKSIZE * 8];
+  u8 buffer[SDMMC_BLOCK_SIZE * 16];
   FSIZE_t offset_start;
   FSIZE_t offset_end;
 };
@@ -31,7 +32,7 @@ static u8* buffered_read(struct BufferedReader* self, FIL* file, FSIZE_t pos, FS
   const FSIZE_t capacity = SIZEOF(self->buffer);
   ASSERT(len <= capacity);
   if (unlikely(!(self->offset_start <= pos && pos + len <= self->offset_end))) {
-    self->offset_start = pos & ~(BLOCKSIZE - 1); // align to 512-byte boundaries
+    self->offset_start = align_to(pos, SDMMC_BLOCK_SIZE);
     self->offset_end = self->offset_start;
     if (f_tell(file) != self->offset_start) {
       check_fs_error(f_lseek(file, self->offset_start));
@@ -58,10 +59,6 @@ void video_player_demo(void) {
 
   static FATFS SDFatFS;
   static FIL SDFile;
-
-  while (BSP_SD_Init() != HAL_OK) {
-    HAL_Delay(500);
-  }
 
   check_fs_error(f_mount(&SDFatFS, "", 1));
   check_fs_error(f_open(&SDFile, "bebop_palette.bin", FA_READ));

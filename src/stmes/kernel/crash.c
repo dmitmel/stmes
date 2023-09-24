@@ -592,7 +592,8 @@ __NO_RETURN void enter_crash_screen(void) {
   // We need at least the VGA interrupts to output something to the screen.
   __enable_irq();
 
-  console_clear_screen();
+  // console_clear_screen();
+  console_new_line();
   console_set_color(0x97);
   console_clear_cursor_line();
   console_set_color(0x17);

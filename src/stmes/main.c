@@ -5,7 +5,6 @@
 #include "stmes/kernel/mpu.h"
 #include "stmes/kernel/task.h"
 #include "stmes/kernel/time.h"
-#include "stmes/sdio.h"
 #include "stmes/utils.h"
 #include "stmes/video/console.h"
 #include "stmes/video/vga.h"
@@ -22,7 +21,6 @@ int main(void) {
   console_init();
 
   gpio_init();
-  MX_SDIO_SD_Init();
 
   vga_init();
   vga_apply_timings(&VGA_TIMINGS_640x480_57hz);
@@ -32,9 +30,9 @@ int main(void) {
   // mandelbrot_demo();
   // pong_demo();
   // print_tasks_demo();
-  // sd_card_benchmark();
+  sd_card_benchmark();
   // terminal_demo();
-  text_rendering_benchmark();
+  // text_rendering_benchmark();
   // video_player_demo();
 }
 

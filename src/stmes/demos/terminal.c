@@ -1,7 +1,6 @@
 #include "stmes/demos.h"
 #include "stmes/fatfs.h"
 #include "stmes/kernel/task.h"
-#include "stmes/sdio.h"
 #include "stmes/utils.h"
 #include "stmes/video/console.h"
 #include "stmes/video/vga.h"
@@ -18,11 +17,6 @@ static struct Task terminal_task;
 static void terminal_task_fn(__UNUSED void* user_data) {
   static FATFS SDFatFS;
   static DIR SDDir;
-
-  while (BSP_SD_Init() != HAL_OK) {
-    printf(".");
-    task_sleep(1000);
-  }
 
   check_fs_error(f_mount(&SDFatFS, "", 1));
   check_fs_error(f_opendir(&SDDir, "/"));

@@ -79,20 +79,19 @@ void console_new_line(void) {
     self->top_line = (self->top_line + 1) % CONSOLE_LINES;
     console_clear_line(self->cursor_line);
   }
+  self->cursor_col = 0;
 }
 
 void console_putchar(char c) {
   struct ConsoleBuffer* self = &console_buffer;
   if (c == '\n') {
     console_new_line();
-    self->cursor_col = 0;
   } else if (c == '\r') {
     self->cursor_col = 0;
   } else {
     console_set_char(self->cursor_line, self->cursor_col, c);
     self->cursor_col += 1;
     if (self->cursor_col >= CONSOLE_COLUMNS) {
-      self->cursor_col = 0;
       console_new_line();
     }
   }

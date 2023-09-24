@@ -61,8 +61,8 @@ __STATIC_FORCEINLINE void mpu_setup_region(const struct MpuRegionConfig* cfg) {
   ASSERT(cfg->number < MPU_MAX_REGIONS_NUMBER);
   usize size = cfg->end_addr - cfg->base_addr + 1;
   ASSERT(size >= MPU_MIN_REGION_SIZE);
-  ASSERT((size & (size - 1)) == 0);           // Check that the size is a power of 2
-  ASSERT((cfg->base_addr & (size - 1)) == 0); // Check the alignment of the base address
+  ASSERT(is_power_of_two(size));
+  ASSERT(is_aligned(cfg->base_addr, size));
   u32 size_log2 = 31 - __CLZ(size);
   u32 attrs = MPU_RASR_ENABLE_Msk;
   attrs |= (size_log2 - 1) << MPU_RASR_SIZE_Pos;

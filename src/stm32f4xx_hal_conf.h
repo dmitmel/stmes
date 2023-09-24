@@ -60,7 +60,7 @@
 /* #define HAL_RNG_MODULE_ENABLED */
 /* #define HAL_RTC_MODULE_ENABLED */
 /* #define HAL_SAI_MODULE_ENABLED */
-#define HAL_SD_MODULE_ENABLED
+/* #define HAL_SD_MODULE_ENABLED */
 /* #define HAL_MMC_MODULE_ENABLED */
 /* #define HAL_SPI_MODULE_ENABLED */
 #define HAL_TIM_MODULE_ENABLED
@@ -270,8 +270,6 @@
 /**
   * @brief Include module's header file
   */
-
-#include "stm32_hal_patches.h"
 
 #ifdef HAL_RCC_MODULE_ENABLED
   #include "stm32f4xx_hal_rcc.h"

@@ -1,6 +1,5 @@
 #include "stmes/demos.h"
 #include "stmes/fatfs.h"
-#include "stmes/sdio.h"
 #include "stmes/utils.h"
 #include "stmes/video/framebuf.h"
 #include "stmes/video/vga.h"
@@ -12,10 +11,6 @@
 void image_viewer_demo(void) {
   static FATFS SDFatFS;
   static FIL SDFile;
-
-  while (BSP_SD_Init() != HAL_OK) {
-    HAL_Delay(500);
-  }
 
   check_fs_error(f_mount(&SDFatFS, "", 1));
   check_fs_error(f_open(&SDFile, "penguins_palette.bin", FA_READ));

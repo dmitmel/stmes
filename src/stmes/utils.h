@@ -2,6 +2,7 @@
 
 #include <cmsis_compiler.h>
 #include <inttypes.h>
+#include <machine/endian.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -28,12 +29,16 @@ extern "C" {
 #define BITS8(a,b,c,d,e,f,g,h) ((a)<<7 | (b)<<6 | (c)<<5 | (d)<<4 | (e)<<3 | (f)<<2 | (g)<<1 | (h)<<0)
 // clang-format on
 
+// Poor man's loop unroller macros for fixed repeat counts that just copy-paste
+// the given code. Since the provided statement may contain commas, a variadic
+// macro parameter must be used to capture it because otherwise the
+// preprocessor will split the statement into multiple "arguments".
 // clang-format off
-#define UNROLL_2(x) {x;x;}
-#define UNROLL_4(x) {x;x;x;x;}
-#define UNROLL_8(x) {x;x;x;x;x;x;x;x;}
-#define UNROLL_10(x) {x;x;x;x;x;x;x;x;x;x;}
-#define UNROLL_16(x) {x;x;x;x;x;x;x;x;x;x;x;x;x;x;x;x;}
+#define UNROLL_2(...) {__VA_ARGS__;__VA_ARGS__;}
+#define UNROLL_4(...) {__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;}
+#define UNROLL_8(...) {__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;}
+#define UNROLL_10(...) {__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;}
+#define UNROLL_16(...) {__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;__VA_ARGS__;}
 // clang-format on
 
 #ifdef __GNUC__
@@ -151,6 +156,22 @@ void fast_memcpy_u32(u32* dst, const u32* src, usize n);
 
 i32 humanize_units(char* buf, usize buf_size, i64 value);
 i32 humanize_bytes(char* buf, usize buf_size, i64 bytes);
+
+#define u32_swap_bytes(x) __builtin_bswap32(x)
+#if BYTE_ORDER == LITTLE_ENDIAN
+#define u32_from_le(x) ((u32)(x))
+#define u32_from_be(x) __builtin_bswap32(x)
+#else
+#define u32_from_le(x) __builtin_bswap32(x)
+#define u32_from_be(x) ((u32)(x))
+#endif
+
+#define is_power_of_two(x) (((x) & ((x)-1)) == 0)
+#define is_aligned(x, align) (((x) & ((align)-1)) == 0)
+#define align_to(x, align) ((x) & ~((align)-1))
+#define test_bit(x, bit) (((x) & (bit)) != 0)
+#define test_any_bit(x, bit) (((x) & (bit)) != 0)
+#define test_all_bits(x, bit) (((x) & (bit)) == bit)
 
 #ifdef __cplusplus
 }

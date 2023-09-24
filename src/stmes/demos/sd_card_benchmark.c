@@ -1,7 +1,7 @@
 #include "stmes/demos.h"
+#include "stmes/drivers/sdmmc.h"
 #include "stmes/fatfs.h"
 #include "stmes/kernel/task.h"
-#include "stmes/sdio.h"
 #include "stmes/utils.h"
 #include "stmes/video/console.h"
 #include "stmes/video/vga.h"
@@ -25,50 +25,80 @@ static struct Notification progress_task_notify;
 
 static FATFS SDFatFS;
 static FIL SDFile;
+#if !_FS_READONLY
+static FIL SDFile2;
+#endif
 
 static void test_task_fn(__UNUSED void* user_data) {
-  while (BSP_SD_Init() != HAL_OK) {
-    printf(".");
-    task_sleep(1000);
+  static char buf[SDMMC_BLOCK_SIZE * 32];
+
+  FRESULT fres = f_mount(&SDFatFS, "", 1);
+  if (fres == FR_NO_FILESYSTEM) {
+#if !_FS_READONLY && _USE_MKFS
+    fres = f_mkfs("", FM_ANY, 0, buf, sizeof(buf));
+#endif
   }
+  check_fs_error(fres);
 
-  console_clear_screen();
+  const struct SdmmcCard* card = sdmmc_get_card();
+  printf(
+    "CID: %08" PRIX32 " %08" PRIX32 " %08" PRIX32 " %08" PRIX32 "\n",
+    card->cid.words[3],
+    card->cid.words[2],
+    card->cid.words[1],
+    card->cid.words[0]
+  );
+  const struct SdCID* cid = &card->cid.sd;
+  printf(" Manufacturer ID    : 0x%02X\n", cid->manufacturer_id);
+  printf(" OEM/Application ID : %.2s\n", cid->oem_application_id);
+  const char* name = cid->product_name;
+  printf(" Product Name       : %c%c%c%c%c\n", name[4], name[3], name[2], name[1], name[0]);
+  printf(
+    " Product Revision   : %d.%d\n",
+    (cid->product_revision >> 4) & 0xF,
+    cid->product_revision & 0xF
+  );
+  printf(" Serial Number      : 0x%08" PRIX32 "\n", cid->serial_number);
+  printf(
+    " Manufacturing Date : %04d/%02d\n", cid->manufacturing_year + 2000, cid->manufacturing_month
+  );
 
-  check_fs_error(f_mount(&SDFatFS, "", 1));
+  task_sleep(3000);
 
   while (true) {
     check_fs_error(f_open(&SDFile, "bebop_palette.bin", FA_READ));
+#if !_FS_READONLY
+    check_fs_error(f_open(&SDFile2, "copy.bin", FA_WRITE | FA_CREATE_ALWAYS));
+#endif
 
     printf("loading %lu\n", f_size(&SDFile));
     task_yield();
 
     usize total_bytes = 0;
-    static char buf[BLOCKSIZE * 8];
     Systime start_time = systime_now();
 
     while (true) {
       task_notify(&progress_task_notify);
-      // yield();
+      task_yield();
+#if 1
       usize bytes_read = 0;
-      if (f_read(&SDFile, buf, sizeof(buf), &bytes_read) != FR_OK) {
-        break;
-      }
-      if (bytes_read == 0) {
-        break;
-      }
+      check_fs_error(f_read(&SDFile, buf, sizeof(buf), &bytes_read));
+      if (bytes_read == 0) break;
       total_bytes += bytes_read;
+#if !_FS_READONLY
+      check_fs_error(f_write(&SDFile2, buf, bytes_read, &bytes_read));
+#endif
+#else
+      // disk_read(0, (BYTE*)buf, total_bytes / SDMMC_BLOCK_SIZE, sizeof(buf) / SDMMC_BLOCK_SIZE);
+      sdmmc_read(
+        (u8*)buf, total_bytes / SDMMC_BLOCK_SIZE, sizeof(buf) / SDMMC_BLOCK_SIZE, NO_DEADLINE
+      );
+      total_bytes += sizeof(buf);
+      if (total_bytes >= 1024 * 1024) {
+        break;
+      }
+#endif
     }
-
-    // for (u32 i = 0, sectors = sizeof(buf) / BLOCKSIZE; true; i += sectors) {
-    //   task_notify(&progress_task_notify);
-    //   // yield();
-    //   disk_read(0, (BYTE*)buf, i, sectors);
-    //   u32 bytes_read = BLOCKSIZE * sectors;
-    //   if (total_bytes >= 1024 * 1024) {
-    //     break;
-    //   }
-    //   total_bytes += bytes_read;
-    // }
 
     task_notify(&progress_task_notify);
     task_yield();
@@ -84,7 +114,13 @@ static void test_task_fn(__UNUSED void* user_data) {
 
     task_sleep(2000);
     f_close(&SDFile);
+#if !_FS_READONLY
+    f_close(&SDFile2);
+    break;
+#endif
   }
+
+  check_fs_error(f_mount(0, "", 0));
 }
 
 static void progress_task_fn(__UNUSED void* user_data) {
