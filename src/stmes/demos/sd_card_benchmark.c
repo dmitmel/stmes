@@ -25,7 +25,7 @@ static struct Notification progress_task_notify;
 
 static FATFS SDFatFS;
 static FIL SDFile;
-#if !_FS_READONLY
+#if !FF_FS_READONLY
 static FIL SDFile2;
 #endif
 
@@ -34,7 +34,7 @@ static void test_task_fn(__UNUSED void* user_data) {
 
   FRESULT fres = f_mount(&SDFatFS, "", 1);
   if (fres == FR_NO_FILESYSTEM) {
-#if !_FS_READONLY && _USE_MKFS
+#if !FF_FS_READONLY && FF_USE_MKFS
     fres = f_mkfs("", FM_ANY, 0, buf, sizeof(buf));
 #endif
   }
@@ -67,11 +67,11 @@ static void test_task_fn(__UNUSED void* user_data) {
 
   while (true) {
     check_fs_error(f_open(&SDFile, "bebop_palette.bin", FA_READ));
-#if !_FS_READONLY
+#if !FF_FS_READONLY
     check_fs_error(f_open(&SDFile2, "copy.bin", FA_WRITE | FA_CREATE_ALWAYS));
 #endif
 
-    printf("loading %lu\n", f_size(&SDFile));
+    printf("loading %" PRIu32 "\n", f_size(&SDFile));
     task_yield();
 
     usize total_bytes = 0;
@@ -85,7 +85,7 @@ static void test_task_fn(__UNUSED void* user_data) {
       check_fs_error(f_read(&SDFile, buf, sizeof(buf), &bytes_read));
       if (bytes_read == 0) break;
       total_bytes += bytes_read;
-#if !_FS_READONLY
+#if !FF_FS_READONLY
       check_fs_error(f_write(&SDFile2, buf, bytes_read, &bytes_read));
 #endif
 #else
@@ -114,7 +114,7 @@ static void test_task_fn(__UNUSED void* user_data) {
 
     task_sleep(2000);
     f_close(&SDFile);
-#if !_FS_READONLY
+#if !FF_FS_READONLY
     f_close(&SDFile2);
     break;
 #endif

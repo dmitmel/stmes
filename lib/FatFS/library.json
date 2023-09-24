@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/platformio/platformio-core/develop/platformio/assets/schema/library.json",
   "build": {
-    "srcFilter": ["+<**/*.c>", "-<option/*.c>", "+<option/unicode.c>"]
+    "srcFilter": ["+<**/*.c>", "-<ffsystem.c>", "-<diskio.c>"]
   }
 }

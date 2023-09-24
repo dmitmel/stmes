@@ -5,6 +5,7 @@
 #include "stmes/utils.h"
 #include <ff.h>
 #include <printf.h>
+#include <stdlib.h>
 #include <stm32f4xx_hal.h>
 #include <stm32f4xx_ll_sdmmc.h>
 
@@ -16,35 +17,40 @@ static u8 dma_scratch[SDMMC_BLOCK_SIZE] __ALIGNED(4);
 
 static volatile DSTATUS sd_status = STA_NOINIT;
 
+#if FF_USE_LFN == 3
 void* ff_memalloc(UINT msize) {
-  return ff_malloc(msize);
+  return malloc(msize);
 }
-
 void ff_memfree(void* mblock) {
-  ff_free(mblock);
+  free(mblock);
+}
+#endif
+
+#if FF_FS_REENTRANT
+static struct Mutex* get_fatfs_mutex(int volume) {
+  ASSERT(0 <= volume && volume <= FF_VOLUMES);
+  static struct Mutex ff_mutexes[FF_VOLUMES + 1];
+  return &ff_mutexes[volume];
 }
 
-int ff_cre_syncobj(BYTE volume, struct Mutex** mutex) {
-  ASSERT(volume < _VOLUMES);
-  static struct Mutex ff_mutexes[_VOLUMES];
-  *mutex = &ff_mutexes[volume];
-  mutex_init(*mutex);
+int ff_mutex_create(int volume) {
+  mutex_init(get_fatfs_mutex(volume));
   return true;
 }
 
-int ff_del_syncobj(struct Mutex* mutex) {
-  UNUSED(mutex);
+void ff_mutex_delete(int volume) {
+  UNUSED(volume);
+}
+
+int ff_mutex_take(int volume) {
+  mutex_lock(get_fatfs_mutex(volume));
   return true;
 }
 
-int ff_req_grant(struct Mutex* mutex) {
-  mutex_lock(mutex);
-  return true;
+void ff_mutex_give(int volume) {
+  mutex_unlock(get_fatfs_mutex(volume));
 }
-
-void ff_rel_grant(struct Mutex* mutex) {
-  mutex_unlock(mutex);
-}
+#endif
 
 static HAL_StatusTypeDef sd_wait_for_card_state(enum SdmmcCardState state, Systime deadline) {
   do {
@@ -85,7 +91,7 @@ DSTATUS disk_status(BYTE pdrv) {
   return sd_check_status();
 }
 
-DRESULT disk_read(BYTE pdrv, BYTE* buffer, DWORD sector, UINT count) {
+DRESULT disk_read(BYTE pdrv, BYTE* buffer, LBA_t sector, UINT count) {
   UNUSED(pdrv);
   Systime deadline = timeout_to_deadline(SD_TIMEOUT);
   if (sd_wait_for_card_state(SDMMC_STATE_TRANSFER, deadline) != HAL_OK) return RES_ERROR;
@@ -107,7 +113,7 @@ DRESULT disk_read(BYTE pdrv, BYTE* buffer, DWORD sector, UINT count) {
   return RES_OK;
 }
 
-DRESULT disk_write(BYTE pdrv, const BYTE* buffer, DWORD sector, UINT count) {
+DRESULT disk_write(BYTE pdrv, const BYTE* buffer, LBA_t sector, UINT count) {
   UNUSED(pdrv);
   Systime deadline = timeout_to_deadline(SD_TIMEOUT);
   if (sd_wait_for_card_state(SDMMC_STATE_TRANSFER, deadline) != HAL_OK) return RES_ERROR;
@@ -139,7 +145,7 @@ DRESULT disk_ioctl(BYTE pdrv, BYTE cmd, void* out) {
       return RES_OK;
     }
     case GET_SECTOR_COUNT: {
-      *(DWORD*)out = sdmmc_get_blocks_count(sdmmc_get_card());
+      *(LBA_t*)out = sdmmc_get_blocks_count(sdmmc_get_card());
       return RES_OK;
     }
     case GET_SECTOR_SIZE: {
@@ -151,7 +157,7 @@ DRESULT disk_ioctl(BYTE pdrv, BYTE cmd, void* out) {
       return RES_OK;
     }
     case CTRL_TRIM: {
-      DWORD start = ((DWORD*)out)[0], end = ((DWORD*)out)[1];
+      LBA_t start = ((LBA_t*)out)[0], end = ((LBA_t*)out)[1];
       // TODO: Erasing may take a very long time, calculate the timeout.
       Systime deadline = timeout_to_deadline(NO_DEADLINE);
       if (sd_wait_for_card_state(SDMMC_STATE_TRANSFER, deadline) != HAL_OK) return RES_ERROR;
@@ -163,10 +169,6 @@ DRESULT disk_ioctl(BYTE pdrv, BYTE cmd, void* out) {
       return RES_PARERR;
     }
   }
-}
-
-DWORD get_fattime(void) {
-  return 0;
 }
 
 __NO_RETURN void crash_on_fs_error(FRESULT code, const char* file, u32 line) {
