@@ -39,8 +39,6 @@
 // <http://elm-chan.org/docs/mmc/mmc_e.html>
 // <https://www.kingston.com/datasheets/SDCIT-specsheet-8gb-32gb_en.pdf>
 
-// TODO: Verify the APP_CMD status bit after CMD55
-
 // TODO: Support SDUC cards:
 // 1. Parse CSD v3.
 // 2. Store block addresses and numbers in u64.
@@ -381,7 +379,6 @@ u32 sdmmc_init_card(const struct SdmmcHostCapabilities* host_caps) {
       // XPC bit - don't enable the maximum performance mode of SDXC cards
       host_ocr.bits.sdxc_power_control = SDXC_POWER_SAVING;
     }
-    if ((err = sdmmc_command(SDMMC_CMD55_APP_CMD, rca_arg(card), response))) goto exit;
     if ((err = sdmmc_command(SD_ACMD41_SD_SEND_OP_COND, host_ocr.word, response))) goto exit;
     union SdmmcOCR card_ocr = { .word = response[0] };
     // Check the busy status bit: 1 means that the card is still booting, 0
@@ -464,7 +461,6 @@ u32 sdmmc_init_card(const struct SdmmcHostCapabilities* host_caps) {
   u32 scr_data[2];
   printf("reading SCR data\n");
   if ((err = sdmmc_command(SDMMC_CMD16_SET_BLOCKLEN, sizeof(scr_data), response))) goto exit;
-  if ((err = sdmmc_command(SDMMC_CMD55_APP_CMD, rca_arg(card), response))) goto exit;
   // For some reason the SCR is sent via the DAT lines and not, for example,
   // with the long response format R2.
   prepare_sdio_for_transfer(SDIO_RX, (u8*)scr_data, 1, sizeof(scr_data));
@@ -548,7 +544,6 @@ u32 sdmmc_init_card(const struct SdmmcHostCapabilities* host_caps) {
   // This step isn't strictly necessary, but I guess we might want to equalize
   // the electrical characteristics of all data pins.
   printf("disabling pull-up resistor on CD/DAT3 pin\n");
-  if ((err = sdmmc_command(SDMMC_CMD55_APP_CMD, rca_arg(card), response))) goto exit;
   if ((err = sdmmc_command(SD_ACMD42_SET_CLR_CARD_DETECT, 0, response))) goto exit;
 
   u32 bus_width = SDIO_BUS_WIDE_1B;
@@ -557,7 +552,6 @@ u32 sdmmc_init_card(const struct SdmmcHostCapabilities* host_caps) {
   if (host_caps->use_4bit_data_bus && card->scr.v1.supports_4bit_wide_bus) {
     bus_width = SDIO_BUS_WIDE_4B;
     printf("switching data bus to 4-bit mode\n");
-    if ((err = sdmmc_command(SDMMC_CMD55_APP_CMD, rca_arg(card), response))) goto exit;
     if ((err = sdmmc_command(SD_ACMD6_SET_BUS_WIDTH, 2, response))) goto exit;
   }
 
@@ -931,6 +925,15 @@ static const struct SdioErrorDef SDIO_ERRORS_R6[] = {
 // appropriately handles the errors according to the response format parameter.
 // TODO: A deadline parameter.
 static u32 sdmmc_command(enum SdmmcCommand cmd, u32 arg, u32 response[4]) {
+  if (unlikely(cmd & SD_ACMD)) {
+    // Application-specific commands must be preceded by CMD55.
+    u32 err = sdmmc_command(SDMMC_CMD55_APP_CMD, rca_arg(&sdmmc_card), response);
+    if (err != SDMMC_ERROR_NONE) return err;
+    union SdmmcCSR status = { .word = response[0] };
+    // CMD55 must've set the bit that tells that the card now expects an ACMD.
+    if (!status.bits.application_command) return SDMMC_ERROR_GENERAL_UNKNOWN_ERR;
+  }
+
   response[3] = response[2] = response[1] = response[0] = 0;
 
 #if SDMMC_LOG_COMMANDS
