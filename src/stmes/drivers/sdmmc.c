@@ -730,6 +730,7 @@ u32 sdmmc_write(const u8* buffer, u32 offset, u32 blocks, Systime deadline) {
   return err;
 }
 
+// Erases blocks in the range from `start` to `end` (inclusive).
 u32 sdmmc_erase(u32 start, u32 end, Systime deadline) {
   UNUSED(deadline);
   ASSERT(start < end);
@@ -744,7 +745,7 @@ u32 sdmmc_erase(u32 start, u32 end, Systime deadline) {
 
   u32 align = sdmmc_get_eraseable_sector_size(card);
   ASSERT(start % align == 0);
-  ASSERT(end % align == 0);
+  ASSERT((end + 1) % align == 0);
 
   if (card->type != SDHC_SDXC_CARD) {
     // SDSC cards use byte (instead of block) addressing.
