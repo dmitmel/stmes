@@ -192,7 +192,7 @@ bool console_render_scanline(u16 vga_line) {
       usize fg_idx = char_attrs & MASK(4), bg_idx = (char_attrs >> 4) & MASK(4);
       // The RAM cache does a pretty good job at keeping these around for
       // strides of characters with the same colors.
-      u32 fg = console_palette[fg_idx], bg = console_palette[bg_idx];
+      VgaPixel fg = console_palette[fg_idx], bg = console_palette[bg_idx];
       if ((font_bytes & 0xFF) != 0) {
         usize i = 0;
         // I'm using the poor man's loop unroller here (the macro simply

@@ -5,26 +5,19 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Debug, Release]
 
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-
+      - uses: carlosperate/arm-none-eabi-gcc-action@v1
+      - run: pip install elf-size-analyze
       - uses: actions/cache@v2
         with:
-          path: |
-            ~/.platformio
-            .pio
-          key: |
-            v1-${{ github.workflow }}-${{ runner.os }}-platformio-${{ hashFiles('**/platformio*.ini') }}
-          restore-keys: |
-            v1-${{ github.workflow }}-${{ runner.os }}-platformio-
-
-      - run: python -m pip install --upgrade pip
-      - run: pip install --upgrade platformio elf-size-analyze
-      - run: pio pkg install
-      - run: pio run -e debug
-      - run: pio run -e release
-      - run: elf-size-analyze --rom --ram ./.pio/build/debug/firmware.elf
+          path: target
+          key: v1-${{github.workflow}}-${{runner.os}}-${{matrix.build_type}}-cmake
+      - run: cmake -B 'target/${{matrix.build_type}}' -DCMAKE_BUILD_TYPE='${{matrix.build_type}}' -DDEPENDENCIES_DIR='target/_deps' -DUPLOAD_TOOL=OFF -DCMAKE_COLOR_DIAGNOSTICS=ON
+      - run: cmake --build 'target/${{matrix.build_type}}' --config '${{matrix.build_type}}' --parallel "$(nproc)"
+      - run: elf-size-analyze --rom --ram 'target/${{matrix.build_type}}/firmware.elf'

@@ -201,7 +201,7 @@ static __NAKED void hardfault_handler_entry(void) {
     "mrs r2, psp\n\t"        // this now because the `push` in the function prologue of the actual
                              // handler written in C will shift them.
     "mov r0, lr\n\t"         // Finally, place LR into the first argument register...
-#ifdef __PLATFORMIO_BUILD_DEBUG__
+#ifdef CFI_DIRECTIVES
     ".cfi_register lr,r0\n\t" // (this directive informs the debugger that LR's value is in r0)
 #endif                        //
     "bl %0\n\t"               // ...and we call the actual handler. We then use its return value
@@ -373,10 +373,10 @@ static u32 hardfault_handler_impl(u32 exc_return, u32 msp, u32 psp) {
   // In case we have received the fault from another interrupt handler (in
   // which case the bit 3 of EXC_RETURN will be unset), some care needs to be
   // taken to exit into the crash screen instead of the handler.
-  if ((exc_return & BIT(3)) == 0) {
+  if (READ_BIT(exc_return, BIT(3)) == 0) {
     // First, set the 3rd bit to indicate that we want to return into the
     // Thread mode. The bits relating to the stacked state are left as-is.
-    exc_return |= BIT(3);
+    SET_BIT(exc_return, BIT(3));
     // Secondly, the hardware performs a bunch of checks on exception return to
     // ensure the processor will be put into a valid execution state (described
     // in section B1.5.8 of DDI0403E under the heading "Integrity checks on
@@ -385,7 +385,7 @@ static u32 hardfault_handler_impl(u32 exc_return, u32 msp, u32 psp) {
     // the Handler mode. Thankfully, this exact check may be disabled. I don't
     // particularly like this solution, however, I am not aware of a way to
     // reliably clear the active status of every exception.
-    SCB->CCR |= SCB_CCR_NONBASETHRDENA_Msk;
+    SET_BIT(SCB->CCR, SCB_CCR_NONBASETHRDENA_Msk);
   }
 
   // HACK: A temporary solution to recovery from stack overflows: let's just
@@ -721,11 +721,16 @@ void assert_failed(u8* file, u32 line) {
 void crash_init_hard_faults(void) {
   // Enable UsageFaults on division by zero and unaligned memory access.
   // <https://developer.arm.com/documentation/ddi0403/d/System-Level-Architecture/System-Address-Map/System-Control-Space--SCS-/Configuration-and-Control-Register--CCR>
-  SCB->CCR |= SCB_CCR_DIV_0_TRP_Msk | SCB_CCR_UNALIGN_TRP_Msk;
+  SET_BIT(SCB->CCR, SCB_CCR_DIV_0_TRP_Msk);
+#if !__ARM_FEATURE_UNALIGNED
+  SET_BIT(SCB->CCR, SCB_CCR_UNALIGN_TRP_Msk);
+#endif
 
   // Enable UsageFault, BusFault and MemFault.
   // <https://developer.arm.com/documentation/ddi0403/d/System-Level-Architecture/System-Address-Map/System-Control-Space--SCS-/System-Handler-Control-and-State-Register--SHCSR>
-  SCB->SHCSR |= SCB_SHCSR_USGFAULTENA_Msk | SCB_SHCSR_BUSFAULTENA_Msk | SCB_SHCSR_MEMFAULTENA_Msk;
+  SET_BIT(
+    SCB->SHCSR, SCB_SHCSR_USGFAULTENA_Msk | SCB_SHCSR_BUSFAULTENA_Msk | SCB_SHCSR_MEMFAULTENA_Msk
+  );
 
   // To debug imprecise BusFaults, write buffering may be disabled (though it
   // will slow down everything).

@@ -497,7 +497,7 @@ static __NAKED void context_switch(__UNUSED enum Syscall syscall_nr) {
     // function, but to keep the stack aligned, another register has to be
     // backed up as well (which will come in handy later).
     "push {r4, lr}\n\t"
-#ifdef __PLATFORMIO_BUILD_DEBUG__
+#ifdef CFI_DIRECTIVES
     // The CFI directives make the assembler put a certain section into the
     // binary that informs the debugger how to unwind the stack and recover
     // local variables in caller frames. They don't generate any machine code
@@ -535,7 +535,7 @@ static __NAKED void context_switch(__UNUSED enum Syscall syscall_nr) {
     // otherwise it will be lost:
     "mov r1, r4\n\t"
     "pop {r4, lr}\n\t"
-#ifdef __PLATFORMIO_BUILD_DEBUG__
+#ifdef CFI_DIRECTIVES
     // Here come the CFI directives once again, this time to inform the
     // debugger that the values of the backed up registers are the same that
     // they were at the beginning of the function.
@@ -690,7 +690,7 @@ __NAKED void SVC_Handler(void) {
     // The normal syscall entry path. Save the LR and the syscall number before
     // calling the handler.
     "push {r0, lr}\n\t"
-#ifdef __PLATFORMIO_BUILD_DEBUG__
+#ifdef CFI_DIRECTIVES
     ".cfi_adjust_cfa_offset 8\n\t"
     ".cfi_rel_offset r0, 0\n\t"
     ".cfi_rel_offset lr, 4\n\t"
@@ -712,7 +712,7 @@ __NAKED void SVC_Handler(void) {
     // Restore the LR and the syscall number, loading it into the first
     // argument register.
     "pop {r0, lr}\n\t"
-#ifdef __PLATFORMIO_BUILD_DEBUG__
+#ifdef CFI_DIRECTIVES
     ".cfi_adjust_cfa_offset -8\n\t"
     ".cfi_restore r0\n\t"
     ".cfi_restore lr\n\t"

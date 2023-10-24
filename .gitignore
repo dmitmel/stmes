@@ -3,8 +3,8 @@
 platformio_local.ini
 local.mk
 .ccls
-.clangd
 compile_commands.json
 .cproject
 .mxproject
 .project
+target/

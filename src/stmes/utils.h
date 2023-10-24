@@ -45,12 +45,10 @@ extern "C" {
 #define GCC_ATTRIBUTE(expr) __attribute__((expr))
 #define likely(x) __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
-#define STATIC_ASSERT(cond) _Static_assert(cond, #cond)
 #else
 #define GCC_ATTRIBUTE(expr)
 #define likely(x) (x)
 #define unlikely(x) (x)
-#define STATIC_ASSERT(cond)
 #endif
 
 #define __WEAK_ALIAS(name) __attribute__((weak, alias(name)))
@@ -161,9 +159,13 @@ i32 humanize_bytes(char* buf, usize buf_size, i64 bytes);
 #if BYTE_ORDER == LITTLE_ENDIAN
 #define u32_from_le(x) ((u32)(x))
 #define u32_from_be(x) __builtin_bswap32(x)
-#else
+#define u32_to_le(x) ((u32)(x))
+#define u32_to_be(x) __builtin_bswap32(x)
+#elif BYTE_ORDER == BIG_ENDIAN
 #define u32_from_le(x) __builtin_bswap32(x)
 #define u32_from_be(x) ((u32)(x))
+#define u32_to_le(x) __builtin_bswap32(x)
+#define u32_to_be(x) ((u32)(x))
 #endif
 
 #define is_power_of_two(x) (((x) & ((x)-1)) == 0)
@@ -172,6 +174,10 @@ i32 humanize_bytes(char* buf, usize buf_size, i64 bytes);
 #define test_bit(x, bit) (((x) & (bit)) != 0)
 #define test_any_bit(x, bit) (((x) & (bit)) != 0)
 #define test_all_bits(x, bit) (((x) & (bit)) == bit)
+
+#if __PLATFORMIO_BUILD_DEBUG__ && !defined(CFI_DIRECTIVES)
+#define CFI_DIRECTIVES 1
+#endif
 
 #ifdef __cplusplus
 }

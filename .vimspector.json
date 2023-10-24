@@ -33,6 +33,14 @@
         "MIDebuggerServerAddress": "localhost:${port}",
         "targetArchitecture": "arm",
 
+        // "debugServerPath": "st-util",
+        // "debugServerArgs": "-p ${port} --semihosting",
+        // "serverStarted": "Listening at \\*:\\d+",
+
+        // "debugServerPath": "pyocd",
+        // "debugServerArgs": "gdbserver --target=stm32f411ceux --port=${port} -O semihost_console_type=stdx -O resume_on_disconnect=true --semihosting",
+        // "serverStarted": "GDB server started on port \\d+",
+
         "debugServerPath": "openocd",
         "debugServerArgs": "-c \"gdb_port ${port}; tcl_port disabled; telnet_port disabled\" -f interface/stlink.cfg -c \"transport select hla_swd\" -f target/stm32f4x.cfg -c \"$$_TARGETNAME configure -event gdb-detach { resume }\" -c \"init\" -c \"reset halt\" -c \"arm semihosting enable\"",
         "serverStarted": "Listening on port \\d+ for gdb connections",

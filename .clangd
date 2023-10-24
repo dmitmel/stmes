@@ -1,0 +1,11 @@
+# vi:ft=yaml:
+CompileFlags:
+  # <https://github.com/clangd/clangd/issues/662#issuecomment-1447233948>
+  Add:
+    - '-Wno-unknown-warning-option'
+    - '-ferror-limit=0' # Display all errors!
+  Remove:
+    # clangd gets confused by options that clang itself doesn't have.
+    - '-fif-conversion'
+    - '-fif-conversion2'
+    - '-fmove-loop-invariants'

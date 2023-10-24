@@ -20,17 +20,16 @@ typedef u32 VgaPixel;
 // pins corresponding to every single bit of the color, and returns a value
 // suitable for writing to the BSRR register.
 __STATIC_FORCEINLINE VgaPixel rgb12_to_vga_pins(VgaPixel color) {
+  VgaPixel pins = 0;
   // Unfortunately I couldn't find a way to get the compiler to figure out the
   // bit airthmetic for me, so the masks and shifts in this function must be
   // recalculated in case the VGA pixel pins are changed.
-  STATIC_ASSERT(VGA_ALL_RED_PINS == 0x7400);
-  STATIC_ASSERT(VGA_ALL_GREEN_PINS == 0x03C0);
-  STATIC_ASSERT(VGA_ALL_BLUE_PINS == 0x000F);
-  VgaPixel pins = 0;
-  pins |= (color & 0x00F) << 0; // color[ 3:0] -> pins[ 3:0 ]
-  pins |= (color & 0x1F0) << 2; // color[ 8:4] -> pins[10:6 ]
-  pins |= (color & 0xE00) << 3; // color[11:9] -> pins[14:12]
-  pins |= (pins ^ 0x77CF) << 16;
+  if (VGA_ALL_RED_PINS == 0x7400 && VGA_ALL_GREEN_PINS == 0x03C0 && VGA_ALL_BLUE_PINS == 0x000F) {
+    pins |= (color & 0x00F) << 0; // color[ 3:0] -> pins[ 3:0 ]
+    pins |= (color & 0x1F0) << 2; // color[ 8:4] -> pins[10:6 ]
+    pins |= (color & 0xE00) << 3; // color[11:9] -> pins[14:12]
+  }
+  pins |= (pins ^ VGA_ALL_RGB_PINS) << 16;
   return pins;
 }
 
