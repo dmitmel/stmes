@@ -1,6 +1,5 @@
 .pio/
 .cache/clangd/
-platformio_local.ini
 local.mk
 .ccls
 compile_commands.json

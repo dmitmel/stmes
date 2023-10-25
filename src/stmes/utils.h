@@ -175,10 +175,6 @@ i32 humanize_bytes(char* buf, usize buf_size, i64 bytes);
 #define test_any_bit(x, bit) (((x) & (bit)) != 0)
 #define test_all_bits(x, bit) (((x) & (bit)) == bit)
 
-#if __PLATFORMIO_BUILD_DEBUG__ && !defined(CFI_DIRECTIVES)
-#define CFI_DIRECTIVES 1
-#endif
-
 #ifdef __cplusplus
 }
 #endif
