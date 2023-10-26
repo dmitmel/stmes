@@ -98,6 +98,10 @@ static void stop_sdio_transfer(void);
 static u32 wait_for_sdio_transfer(Systime deadline);
 static u32 sdmmc_command(enum SdmmcCommand cmd, u32 arg, u32 response[4]);
 
+static __attribute__((constructor)) void sdmmc_init_locks(void) {
+  mutex_init(&sdio_lock);
+}
+
 void sdmmc_init_gpio(void) {
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();

@@ -3,8 +3,7 @@
 #include "stmes/kernel/task.h"
 
 void mutex_init(struct Mutex* self) {
-  __atomic_clear(&self->locked, __ATOMIC_RELAXED);
-  __atomic_store_n(&self->owner, DEAD_TASK_ID, __ATOMIC_RELAXED);
+  __atomic_store_n(&self->lock_owner, DEAD_TASK_ID, __ATOMIC_RELAXED);
   self->lock_count = 0;
   task_notify_init(&self->notify);
 }
@@ -14,21 +13,36 @@ void mutex_init(struct Mutex* self) {
 // <https://github.com/Amanieu/parking_lot/blob/4adcfdda3cfb4e70cfd876ccbeeb176cb2b88c5b/lock_api/src/remutex.rs#L77-L152>
 
 __STATIC_FORCEINLINE bool mutex_lock_impl(struct Mutex* self, bool just_try) {
-  TaskId my_id = get_current_task()->id;
-  if (__atomic_load_n(&self->owner, __ATOMIC_RELAXED) == my_id) {
-    self->lock_count += 1;
-    ASSERT(self->lock_count != 0); // Counter overflow check
-    return true;
-  }
-  while (__atomic_test_and_set(&self->locked, __ATOMIC_ACQUIRE) != 0) {
-    if (just_try) {
-      return false;
+  const TaskId my_id = get_current_task()->id;
+  while (true) {
+    TaskId expected_owner = DEAD_TASK_ID;
+    // Locks can be implemented with a single CAS! Note that the current_owner
+    // variable starts out with the value we expect to see, and will be set to
+    // the actual value of lock_owner in case they don't match - the signatures
+    // of GCC's functions for atomic operations sure are weird.
+    bool did_lock = __atomic_compare_exchange_n(
+      &self->lock_owner, &expected_owner, my_id, /*weak*/ false, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED
+    );
+    if (likely(did_lock)) {
+      // The mutex was in unlocked state and has been successfully acquired.
+      self->lock_count = 1;
+      return true;
+    } else if (likely(expected_owner == my_id)) {
+      // lock_owner wasn't equal to DEAD_TASK_ID, meaning that the lock was
+      // already locked, but expected_owner has been updated with the lock's
+      // current owner, and it seems to be us - the mutex has been acquired
+      // recursively from the same task.
+      self->lock_count += 1;
+      ASSERT(self->lock_count != 0); // Counter overflow check
+      return true;
+    } else {
+      // Couldn't acquire the mutex, try again if necessary.
+      if (just_try) {
+        return false;
+      }
+      task_wait(&self->notify, NO_DEADLINE);
     }
-    task_wait(&self->notify, NO_DEADLINE);
   }
-  __atomic_store_n(&self->owner, my_id, __ATOMIC_RELAXED);
-  self->lock_count = 1;
-  return true;
 }
 
 void mutex_lock(struct Mutex* self) {
@@ -45,8 +59,7 @@ void mutex_unlock(struct Mutex* self) {
   if (self->lock_count != 0) {
     return;
   }
-  __atomic_store_n(&self->owner, DEAD_TASK_ID, __ATOMIC_RELAXED);
-  __atomic_clear(&self->locked, __ATOMIC_RELEASE);
+  __atomic_store_n(&self->lock_owner, DEAD_TASK_ID, __ATOMIC_RELEASE);
   if (task_notify(&self->notify)) {
     task_yield();
   }

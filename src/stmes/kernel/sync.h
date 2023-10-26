@@ -10,9 +10,8 @@ extern "C" {
 // TODO: deadlines
 
 struct Mutex {
-  volatile bool locked;
-  volatile TaskId owner;
-  u16 lock_count; // Using a 16-bit field here to use up all the padding bytes.
+  volatile TaskId lock_owner;
+  u16 lock_count; // Using a 32-bit field here will create more padding
   struct Notification notify;
 };
 

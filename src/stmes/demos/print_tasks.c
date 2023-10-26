@@ -45,6 +45,8 @@ static void print_task_fn(__UNUSED void* user_data) {
 }
 
 void print_tasks_demo(void) {
+  mutex_init(&console_mutex);
+
   struct TaskParams render_task_params = {
     .stack_start = render_task_stack,
     .stack_size = sizeof(render_task_stack),
