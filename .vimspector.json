@@ -2,38 +2,37 @@
   "$schema": "https://puremourning.github.io/vimspector/schema/vimspector.schema.json",
   "configurations": {
     "attach and reset": {
-      "adapter": "vscode-cpptools",
-
+      "adapter": "vscode-cpptools-openocd",
       "variables": {
         "cwd": "${workspaceFolder}",
-        "program": "${workspaceFolder}/.pio/build/debug/firmware.elf",
+        "program": "${workspaceFolder}/target/Debug/firmware.elf",
         "port": "${unusedLocalPort}"
       },
       "configuration": {
         "request": "launch",
         "program": "${program}",
         "stopAtEntry": false,
-        "externalConsole": false,
+        "externalConsole": false
+      }
+    },
 
+    "attach and reset (stop at entry)": {
+      "extends": "attach and reset",
+      "configuration": {
+        "request": "launch",
+        "stopAtEntry": true
+      }
+    }
+  },
+
+  "adapters": {
+    "vscode-cpptools-arm-gdb": {
+      "extends": "vscode-cpptools",
+      "configuration": {
         "MIMode": "gdb",
         "MIDebuggerPath": "arm-none-eabi-gdb",
         "MIDebuggerServerAddress": "localhost:${port}",
-        "targetArchitecture": "arm",
-
-        // "debugServerPath": "st-util",
-        // "debugServerArgs": "-p ${port} --semihosting",
-        // "serverStarted": "Listening at \\*:\\d+",
-
-        // "debugServerPath": "pyocd",
-        // "debugServerArgs": "gdbserver --target=stm32f411ceux --port=${port} -O semihost_console_type=stdx -O resume_on_disconnect=true --semihosting",
-        // "serverStarted": "GDB server started on port \\d+",
-
-        "debugServerPath": "openocd",
-        "debugServerArgs": "-c \"gdb_port ${port}; tcl_port disabled; telnet_port disabled\" -f interface/stlink.cfg -c \"transport select hla_swd\" -f target/stm32f4x.cfg -c \"$$_TARGETNAME configure -event gdb-detach { resume }\" -c \"init\" -c \"reset halt\" -c \"arm semihosting enable\"",
-        "serverStarted": "Listening on port \\d+ for gdb connections",
-        "filterStdout": false,
-        "filterStderr": true
-
+        "targetArchitecture": "arm"
         // "logging": {
         //   "exceptions": true,
         //   "moduleLoad": true,
@@ -44,11 +43,36 @@
       }
     },
 
-    "attach and reset (stop at entry)": {
-      "extends": "attach and reset",
+    "vscode-cpptools-openocd": {
+      "extends": "vscode-cpptools-arm-gdb",
       "configuration": {
-        "request": "launch",
-        "stopAtEntry": true
+        "debugServerPath": "openocd",
+        "debugServerArgs": "-c \"gdb_port ${port}; tcl_port disabled; telnet_port disabled\" -f interface/stlink.cfg -c \"transport select hla_swd\" -f target/stm32f4x.cfg -c \"$$_TARGETNAME configure -event gdb-detach { resume }\" -c \"init\" -c \"reset halt\" -c \"arm semihosting enable\"",
+        "serverStarted": "Listening on port \\d+ for gdb connections",
+        "filterStdout": false,
+        "filterStderr": true
+      }
+    },
+
+    "vscode-cpptools-stutil": {
+      "extends": "vscode-cpptools-arm-gdb",
+      "configuration": {
+        "debugServerPath": "st-util",
+        "debugServerArgs": "-p ${port} --semihosting",
+        "serverStarted": "Listening at \\*:\\d+",
+        "filterStdout": false,
+        "filterStderr": true
+      }
+    },
+
+    "vscode-cpptools-pyocd": {
+      "extends": "vscode-cpptools-arm-gdb",
+      "configuration": {
+        "debugServerPath": "pyocd",
+        "debugServerArgs": "gdbserver --target=stm32f411ceux --port=${port} -O semihost_console_type=stdx -O resume_on_disconnect=true --semihosting",
+        "serverStarted": "GDB server started on port \\d+",
+        "filterStdout": false,
+        "filterStderr": true
       }
     }
   }
