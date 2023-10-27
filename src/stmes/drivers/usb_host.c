@@ -9,13 +9,8 @@
 HCD_HandleTypeDef hhcd_USB_OTG_FS;
 USBH_HandleTypeDef hUsbHostFS;
 enum UsbHostState usb_host_state = USB_HOST_IDLE;
-struct Notification usb_notification;
-struct Channel usb_keyboard_events;
-
-static __attribute__((constructor)) void init_usb_channels(void) {
-  task_notify_init(&usb_notification);
-  channel_init(&usb_keyboard_events);
-}
+struct Notification usb_notification = NOTIFICATION_INIT;
+struct Channel usb_keyboard_events = CHANNEL_INIT;
 
 void OTG_FS_IRQHandler(void) {
   HAL_HCD_IRQHandler(&hhcd_USB_OTG_FS);

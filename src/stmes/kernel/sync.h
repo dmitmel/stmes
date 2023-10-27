@@ -15,6 +15,9 @@ struct Mutex {
   struct Notification notify;
 };
 
+#define MUTEX_INIT \
+  { .lock_owner = DEAD_TASK_ID, .lock_count = 0, .notify = NOTIFICATION_INIT }
+
 void mutex_init(struct Mutex* self);
 void mutex_lock(struct Mutex* self);
 bool mutex_try_lock(struct Mutex* self);
@@ -34,6 +37,9 @@ struct Channel {
   void* message;
   usize message_size;
 };
+
+#define CHANNEL_INIT \
+  { .state = CHANNEL_IDLE, .notify = NOTIFICATION_INIT, .message = NULL, .message_size = 0 }
 
 void channel_init(struct Channel* self);
 void channel_send(struct Channel* self, void* message, usize size);

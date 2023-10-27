@@ -51,6 +51,9 @@ struct Notification {
   volatile TasksMask waiters;
 };
 
+#define NOTIFICATION_INIT \
+  { .waiters = 0 }
+
 #define MAX_ALIVE_TASKS (sizeof(TasksMask) * 8)
 #define DEAD_TASK_ID ((TaskId)-1)
 

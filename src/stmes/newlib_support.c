@@ -85,27 +85,15 @@ struct __lock {
   struct Mutex mutex;
 };
 
-struct __lock __lock___sinit_recursive_mutex;
-struct __lock __lock___sfp_recursive_mutex;
-struct __lock __lock___atexit_recursive_mutex;
-struct __lock __lock___at_quick_exit_mutex;
-struct __lock __lock___malloc_recursive_mutex;
-struct __lock __lock___env_recursive_mutex;
-struct __lock __lock___tz_mutex;
-struct __lock __lock___dd_hash_mutex;
-struct __lock __lock___arc4random_mutex;
-
-__attribute__((constructor)) static void init_retarget_locks(void) {
-  mutex_init(&__lock___sinit_recursive_mutex.mutex);
-  mutex_init(&__lock___sfp_recursive_mutex.mutex);
-  mutex_init(&__lock___atexit_recursive_mutex.mutex);
-  mutex_init(&__lock___at_quick_exit_mutex.mutex);
-  mutex_init(&__lock___malloc_recursive_mutex.mutex);
-  mutex_init(&__lock___env_recursive_mutex.mutex);
-  mutex_init(&__lock___tz_mutex.mutex);
-  mutex_init(&__lock___dd_hash_mutex.mutex);
-  mutex_init(&__lock___arc4random_mutex.mutex);
-}
+struct __lock __lock___sinit_recursive_mutex = { MUTEX_INIT };
+struct __lock __lock___sfp_recursive_mutex = { MUTEX_INIT };
+struct __lock __lock___atexit_recursive_mutex = { MUTEX_INIT };
+struct __lock __lock___at_quick_exit_mutex = { MUTEX_INIT };
+struct __lock __lock___malloc_recursive_mutex = { MUTEX_INIT };
+struct __lock __lock___env_recursive_mutex = { MUTEX_INIT };
+struct __lock __lock___tz_mutex = { MUTEX_INIT };
+struct __lock __lock___dd_hash_mutex = { MUTEX_INIT };
+struct __lock __lock___arc4random_mutex = { MUTEX_INIT };
 
 // The lock/unlock functions specifically used by malloc are overridden in
 // order to catch dynamic memory allocations inside interrupts.

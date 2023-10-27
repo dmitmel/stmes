@@ -80,8 +80,8 @@
 
 static struct SdmmcCard sdmmc_card;
 
-static struct Mutex sdio_lock; // A global lock for the SDIO peripheral.
-static struct Notification sdio_notification;
+static struct Mutex sdio_lock = MUTEX_INIT; // A global lock for the SDIO peripheral.
+static struct Notification sdio_notification = NOTIFICATION_INIT;
 
 struct SdFuncStatus {
   bool supported : 1, busy : 1, selected : 1;
@@ -97,10 +97,6 @@ prepare_sdio_for_transfer(enum SdioTransfer transfer, u8* buffer, u32 blocks, u3
 static void stop_sdio_transfer(void);
 static u32 wait_for_sdio_transfer(Systime deadline);
 static u32 sdmmc_command(enum SdmmcCommand cmd, u32 arg, u32 response[4]);
-
-static __attribute__((constructor)) void sdmmc_init_locks(void) {
-  mutex_init(&sdio_lock);
-}
 
 void sdmmc_init_gpio(void) {
   __HAL_RCC_GPIOA_CLK_ENABLE();
