@@ -80,26 +80,31 @@ off_t _lseek(int fd, off_t offset, int whence) {
 // <https://nadler.com/embedded/newlibAndFreeRTOS.html>
 #if _RETARGETABLE_LOCKING
 
-struct Mutex __lock___sinit_recursive_mutex;
-struct Mutex __lock___sfp_recursive_mutex;
-struct Mutex __lock___atexit_recursive_mutex;
-struct Mutex __lock___at_quick_exit_mutex;
-struct Mutex __lock___malloc_recursive_mutex;
-struct Mutex __lock___env_recursive_mutex;
-struct Mutex __lock___tz_mutex;
-struct Mutex __lock___dd_hash_mutex;
-struct Mutex __lock___arc4random_mutex;
+// From Newlib's point of view, this is an opaque type that we can redefine.
+struct __lock {
+  struct Mutex mutex;
+};
+
+struct __lock __lock___sinit_recursive_mutex;
+struct __lock __lock___sfp_recursive_mutex;
+struct __lock __lock___atexit_recursive_mutex;
+struct __lock __lock___at_quick_exit_mutex;
+struct __lock __lock___malloc_recursive_mutex;
+struct __lock __lock___env_recursive_mutex;
+struct __lock __lock___tz_mutex;
+struct __lock __lock___dd_hash_mutex;
+struct __lock __lock___arc4random_mutex;
 
 __attribute__((constructor)) static void init_retarget_locks(void) {
-  mutex_init(&__lock___sinit_recursive_mutex);
-  mutex_init(&__lock___sfp_recursive_mutex);
-  mutex_init(&__lock___atexit_recursive_mutex);
-  mutex_init(&__lock___at_quick_exit_mutex);
-  mutex_init(&__lock___malloc_recursive_mutex);
-  mutex_init(&__lock___env_recursive_mutex);
-  mutex_init(&__lock___tz_mutex);
-  mutex_init(&__lock___dd_hash_mutex);
-  mutex_init(&__lock___arc4random_mutex);
+  mutex_init(&__lock___sinit_recursive_mutex.mutex);
+  mutex_init(&__lock___sfp_recursive_mutex.mutex);
+  mutex_init(&__lock___atexit_recursive_mutex.mutex);
+  mutex_init(&__lock___at_quick_exit_mutex.mutex);
+  mutex_init(&__lock___malloc_recursive_mutex.mutex);
+  mutex_init(&__lock___env_recursive_mutex.mutex);
+  mutex_init(&__lock___tz_mutex.mutex);
+  mutex_init(&__lock___dd_hash_mutex.mutex);
+  mutex_init(&__lock___arc4random_mutex.mutex);
 }
 
 // The lock/unlock functions specifically used by malloc are overridden in
@@ -107,25 +112,25 @@ __attribute__((constructor)) static void init_retarget_locks(void) {
 void __malloc_lock(struct _reent* reent) {
   UNUSED(reent);
   ASSERT(!in_interrupt_handler());
-  mutex_lock(&__lock___malloc_recursive_mutex);
+  mutex_lock(&__lock___malloc_recursive_mutex.mutex);
 }
 
 void __malloc_unlock(struct _reent* reent) {
   UNUSED(reent);
   ASSERT(!in_interrupt_handler());
-  mutex_unlock(&__lock___malloc_recursive_mutex);
+  mutex_unlock(&__lock___malloc_recursive_mutex.mutex);
 }
 
 void __retarget_lock_init(_LOCK_T* lock_ptr) {
-  struct Mutex* mutex = malloc(sizeof(struct Mutex));
-  mutex_init(mutex);
-  *(struct Mutex**)lock_ptr = mutex;
+  _LOCK_T lock = malloc(sizeof(*lock));
+  mutex_init(&lock->mutex);
+  *lock_ptr = lock;
 }
 
 void __retarget_lock_init_recursive(_LOCK_T* lock_ptr) {
-  struct Mutex* mutex = malloc(sizeof(struct Mutex));
-  mutex_init(mutex);
-  *(struct Mutex**)lock_ptr = mutex;
+  _LOCK_T lock = malloc(sizeof(*lock));
+  mutex_init(&lock->mutex);
+  *lock_ptr = lock;
 }
 
 void __retarget_lock_close(_LOCK_T lock) {
@@ -137,27 +142,27 @@ void __retarget_lock_close_recursive(_LOCK_T lock) {
 }
 
 void __retarget_lock_acquire(_LOCK_T lock) {
-  mutex_lock((struct Mutex*)lock);
+  mutex_lock(&lock->mutex);
 }
 
 void __retarget_lock_acquire_recursive(_LOCK_T lock) {
-  mutex_lock((struct Mutex*)lock);
+  mutex_lock(&lock->mutex);
 }
 
 int __retarget_lock_try_acquire(_LOCK_T lock) {
-  return mutex_try_lock((struct Mutex*)lock);
+  return mutex_try_lock(&lock->mutex);
 }
 
 int __retarget_lock_try_acquire_recursive(_LOCK_T lock) {
-  return mutex_try_lock((struct Mutex*)lock);
+  return mutex_try_lock(&lock->mutex);
 }
 
 void __retarget_lock_release(_LOCK_T lock) {
-  mutex_unlock((struct Mutex*)lock);
+  mutex_unlock(&lock->mutex);
 }
 
 void __retarget_lock_release_recursive(_LOCK_T lock) {
-  mutex_unlock((struct Mutex*)lock);
+  mutex_unlock(&lock->mutex);
 }
 
 #endif
