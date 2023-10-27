@@ -118,6 +118,7 @@ bool console_render_scanline(u16 vga_line) {
   usize y = vga_line / PIXEL_SCALE - (FRAME_HEIGHT - CONSOLE_FRAME_HEIGHT) / 2;
   if (y >= CONSOLE_FRAME_HEIGHT) return false;
 
+  struct ConsoleBuffer* self = &console_buffer;
   struct PixelDmaBuffer* backbuf = swap_pixel_dma_buffers();
   vga_set_next_scanline(backbuf->data);
 
@@ -133,13 +134,14 @@ bool console_render_scanline(u16 vga_line) {
   vga_fast_memset(backbuf->data + last_x, 0, FRAME_WIDTH - last_x);
 
   // Apply the vertical scroll.
-  line_nr = (console_buffer.top_line + line_nr) % CONSOLE_LINES;
+  line_nr = (self->top_line + line_nr) % CONSOLE_LINES;
 
   // NOTE: The timing is CRITICAL in the code below!!!
 
   VgaPixel* pixel_ptr = backbuf->data + x;
-  const u32* text = (const u32*)console_buffer.text[line_nr];
-  const u32* attrs = (const u32*)console_buffer.text_attrs[line_nr];
+  const u32* text = (const u32*)self->text[line_nr];
+  const u32* attrs = (const u32*)self->text_attrs[line_nr];
+  usize cursor_col = self->cursor_line == line_nr ? self->cursor_col : UINTPTR_MAX;
   // The font is stored in a row-major order (i.e. first comes the block for
   // y=0 row of every character, then the block for the row at y=1 and so on
   // and so on) to improve cache locality because we are going to be accessing
@@ -150,6 +152,14 @@ bool console_render_scanline(u16 vga_line) {
     // Note that here we fetch 4 characters and attributes at once.
     u32 chars = *text++;
     u32 char_attrs = *attrs++;
+
+    // Check if the cursor is inside this group of 4 characters.
+    if (cursor_col / 4 == col_nr / 4) {
+      // If so, locate the one under the cursor and replace its attributes.
+      u32 shift = (cursor_col % 4) * 8;
+      char_attrs &= ~(MASK(8) << shift);
+      char_attrs |= (CONSOLE_CURSOR_TEXT_ATTRS << shift);
+    }
 
     // Now comes a bit of SIMD trickery. First, we subtract (in parallel) 0x20
     // from every character (since the font doesn't include the control

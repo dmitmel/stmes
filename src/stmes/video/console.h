@@ -15,6 +15,7 @@ extern "C" {
 #define CONSOLE_FRAME_WIDTH (CONSOLE_COLUMNS * CONSOLE_FONT_WIDTH)
 #define CONSOLE_FRAME_HEIGHT (CONSOLE_LINES * CONSOLE_LINE_HEIGHT)
 #define CONSOLE_TEXT_ATTRS_RESET 0x07
+#define CONSOLE_CURSOR_TEXT_ATTRS 0x70
 
 u8 console_get_current_color(void);
 void console_set_color(u8 color);
