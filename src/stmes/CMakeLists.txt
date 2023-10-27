@@ -3,7 +3,7 @@ target_sources(firmware PRIVATE
   gpio.c
   interrupts.c
   main.c
-  syscalls.c
+  newlib_support.c
   utils.c
 )
 
