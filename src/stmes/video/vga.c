@@ -71,6 +71,9 @@
 #include <stm32f4xx_ll_rcc.h>
 #include <stm32f4xx_ll_tim.h>
 
+#define VGA_STOP_VIDEO_WHEN_DEBUGGING 1
+#define VGA_HIGHLIGHT_MISSED_SCANLINES 1
+
 // <http://tinyvga.com/vga-timing/640x480@60Hz>
 const struct VgaTimings VGA_TIMINGS_640x480_57hz = {
   .pixel_clock_freq = 24000000,
@@ -135,7 +138,7 @@ struct Notification vga_notification;
 static struct VgaState {
   bool rendering_current_frame;
   u16 pixel_timer_prescaler;
-  u32 active_area_start, active_area_height;
+  u32 active_area_start, active_area_height, active_area_width;
   u32 frame_first_line, frame_last_line;
   u32 current_scanline_repeats;
   const VgaPixel* current_scanline;
@@ -428,6 +431,11 @@ void vga_init(void) {
     };
     HAL_GPIO_Init(VGA_VSYNC_GPIO_PORT, &gpio_init);
   }
+
+#if VGA_STOP_VIDEO_WHEN_DEBUGGING
+  __HAL_DBGMCU_FREEZE_TIM2();
+  __HAL_DBGMCU_FREEZE_TIM9();
+#endif
 }
 
 static u32 calc_timer_prescaler(u32 apbclk, u32 frequency, u32 max_prescaler) {
@@ -475,6 +483,7 @@ void vga_apply_timings(const struct VgaTimings* ts) {
 
   vga_state.active_area_start = vert_back_porch;
   vga_state.active_area_height = active_height;
+  vga_state.active_area_width = active_width;
   vga_state.pixel_timer_prescaler = apb2_pixel_prescaler;
   vga_state.rendering_current_frame = false;
 
@@ -683,13 +692,28 @@ __STATIC_FORCEINLINE void vga_on_line_end_reached(void) {
   TIM_TypeDef* vsync_tim = TIM9;
   u32 next_line_nr = LL_TIM_GetCounter(vsync_tim) + 1;
 
-  const VgaPixel* next_scanline = vga_fetch_next_scanline(next_line_nr);
-  if (unlikely(next_scanline == NULL)) return;
+  const VgaPixel* scanline = vga_fetch_next_scanline(next_line_nr);
 
-  // Prepare the apply the requested scanline parameters and prepare the pixel
-  // timer for restart.
-  u32 pixel_period = state->pixel_timer_prescaler * (state->current_frame.pixel_scale + 1);
   u32 left_offset = state->current_frame.offset_left;
+  u16 line_length = state->current_frame.line_length;
+  u32 pixel_scale = state->current_frame.pixel_scale + 1;
+
+  if (unlikely(scanline == NULL)) {
+#if VGA_HIGHLIGHT_MISSED_SCANLINES
+    // If a scanline wasn't ready, it will get replaced by a row of red pixels.
+    // Note that the spare scanline will be read from flash memory!
+    static const VgaPixel spare_scanline[2] = { VGA_ALL_RED_PINS, VGA_ALL_RGB_PINS_RESET };
+    scanline = spare_scanline;
+    pixel_scale = state->active_area_width;
+    left_offset = 0;
+    line_length = SIZEOF(spare_scanline);
+#else
+    return;
+#endif
+  }
+
+  // Apply the requested scanline parameters and prepare the pixel timer for restart.
+  u32 pixel_period = state->pixel_timer_prescaler * pixel_scale;
   if (likely(left_offset == 0)) {
     // Instead of changing the prescaler (which apparently makes the timer less
     // precise) we change the period.
@@ -697,6 +721,9 @@ __STATIC_FORCEINLINE void vga_on_line_end_reached(void) {
     // The prescaler and auto-reload (when it is preloaded) changes are applied
     // only on the following UPDATE event, so we must generate one ourselves:
     LL_TIM_GenerateEvent_UPDATE(pixel_tim);
+    // Unsure why, but a data sync barrier is necessary here, otherwise the
+    // timer peripheral won't observe the auto-reload value set above.
+    __DSB();
     // Forcing an UPDATE event won't start the counter, though that will reset
     // it. However, we want the pixel DMA to be started without any delay, so
     // set the counter to a value that will immediately cause a reload.
@@ -709,9 +736,8 @@ __STATIC_FORCEINLINE void vga_on_line_end_reached(void) {
     // Force an UPDATE event to place the wait period into the ARR register.
     // The fact that it also resets the counter is beneficial this time.
     LL_TIM_GenerateEvent_UPDATE(pixel_tim);
-    // Unsure why, but a short delay is necessary here, otherwise the timer
-    // peripheral won't observe the fake auto-reload value set above.
-    __NOP();
+    // I guess a data barrier is required to confirm the UPDATE event.
+    __DSB();
     // And finally, write the real timer activation period. It won't be applied
     // yet, the first pixel will be outputted only after waiting for the offset
     // period at the start of the next line, but all following pixels will use
@@ -724,10 +750,7 @@ __STATIC_FORCEINLINE void vga_on_line_end_reached(void) {
   LL_TIM_EnableDMAReq_UPDATE(pixel_tim);
   // ..and enable the DMA stream. It will actually be started when the pixel
   // timer starts ticking at the beginning of the next line.
-  u16 line_length = state->current_frame.line_length;
-  dma_configure_transfer(
-    pixel_dma, (usize)&VGA_RGB_GPIO_PORT->BSRR, (usize)next_scanline, line_length
-  );
+  dma_configure_transfer(pixel_dma, (usize)&VGA_RGB_GPIO_PORT->BSRR, (usize)scanline, line_length);
   dma_enable_stream(pixel_dma);
 }
 
