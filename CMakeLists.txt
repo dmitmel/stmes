@@ -200,10 +200,7 @@ target_compile_options(firmware PRIVATE
 )
 
 target_link_libraries(firmware PUBLIC
-  stm32f4xx_hal
-  stm32_usb_host
-  FatFs
-  printf
+  stm32f4xx_hal stm32_usb_host FatFs printf m
 )
 
 # NOTE: On disabling the standard library. GCC by default also links programs
@@ -227,10 +224,11 @@ target_link_libraries(firmware PUBLIC
 #target_link_options(firmware PRIVATE -nostdlib)
 #target_link_libraries(firmware PRIVATE $<$<LINK_LANGUAGE:CXX>:stdc++> m gcc c nosys)
 
-# TODO: Rewrite the linker script.
-set(linker_script "${CMAKE_CURRENT_SOURCE_DIR}/cubemx/STM32F411CEUX_FLASH.ld")
-target_link_options(firmware PRIVATE -T${linker_script})
-set_property(TARGET firmware APPEND PROPERTY LINK_DEPENDS "${linker_script}")
+foreach(linker_script IN ITEMS stm32f411ceux.ld link_sections.ld)
+  set(linker_script "${CMAKE_CURRENT_SOURCE_DIR}/src/${linker_script}")
+  target_link_options(firmware PRIVATE "-T${linker_script}")
+  set_property(TARGET firmware APPEND PROPERTY LINK_DEPENDS "${linker_script}")
+endforeach()
 
 set(linker_map_file $<TARGET_FILE:firmware>.map)
 target_link_options(firmware PRIVATE LINKER:--cref,-Map=${linker_map_file})

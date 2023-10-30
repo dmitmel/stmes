@@ -77,10 +77,7 @@ ISR_WEAK void FPU_IRQHandler(void);
 ISR_WEAK void SPI4_IRQHandler(void);
 ISR_WEAK void SPI5_IRQHandler(void);
 
-__USED __SECTION(".isr_vector") InterruptHandler* const isr_vector[16 + 86] = {
-  // Initial stack pointer:
-  (InterruptHandler*)(usize)&_estack,
-  // Exceptions:
+__USED __SECTION(".vector_table") InterruptHandler* const vector_table[15 + 86] = {
   Reset_Handler,
   NMI_Handler,
   HardFault_Handler,

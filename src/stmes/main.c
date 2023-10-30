@@ -54,9 +54,10 @@ __NAKED void Reset_Handler(void) {
 
 // Performs the early boot sequence and eventually calls main().
 static void prestart(void* initial_stack_ptr) {
-  extern u32 _sdata, _edata, _sidata, _sbss, _ebss;
-  fast_memcpy_u32(&_sdata, &_sidata, &_edata - &_sdata); // copy the .data section
-  fast_memset_u32(&_sbss, 0, &_ebss - &_sbss);           // zero out the .bss section
+  // These symbols are defined by the linker script. You are only meant to use their addresses.
+  extern u32 __data_start[], __data_end[], __data_source[], __bss_start[], __bss_end[];
+  fast_memcpy_u32(__data_start, __data_source, __data_end - __data_start);
+  fast_memset_u32(__bss_start, 0, __bss_end - __bss_start);
 
   // Flush the pipeline in case the initialization of the memory sections above
   // has caused any side effects, or placed any functions into RAM.
@@ -91,10 +92,12 @@ static void prestart(void* initial_stack_ptr) {
   // TODO: this function needs HAL_GetTick to be ready
   system_clock_config();
 
+#if _HAVE_INITFINI_ARRAY
   // Runs the initializers of static variables, constructors of C++ classes and
   // the functions marked with `__attribute__((constructor))`.
   extern void __libc_init_array(void);
   __libc_init_array();
+#endif
 
   hwtimer_init();
 

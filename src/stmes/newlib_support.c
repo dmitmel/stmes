@@ -14,27 +14,18 @@
 #include <unistd.h>
 
 __USED void* _sbrk(ptrdiff_t incr) {
-  // These three are defined by the linker script
-  extern u32 _end, _estack, _Min_Stack_Size;
-
-  const usize stack_limit = (usize)&_estack - (usize)&_Min_Stack_Size;
-  const u8* max_heap = (u8*)stack_limit;
-  u8* prev_heap_end;
-
-  static u8* heap_end = NULL;
-  if (heap_end == NULL) {
-    heap_end = (u8*)&_end;
-  }
-
-  // Prevent the heap from colliding with the stack
-  if (heap_end + incr > max_heap) {
+  extern u32 __heap_start[], __heap_end[]; // These are defined by the linker script
+  // Static initializers are allowed to reference addresses of other symbols
+  static usize heap_ptr = (usize)__heap_start;
+  usize new_heap_ptr = heap_ptr + incr;
+  if ((usize)__heap_start <= new_heap_ptr && new_heap_ptr <= (usize)__heap_end) {
+    usize prev_heap_ptr = heap_ptr;
+    heap_ptr = new_heap_ptr;
+    return (void*)prev_heap_ptr;
+  } else {
     errno = ENOMEM;
     return (void*)-1;
   }
-
-  prev_heap_end = heap_end;
-  heap_end += incr;
-  return (void*)prev_heap_end;
 }
 
 int _write(int fd, const char* buf, size_t len) {

@@ -81,12 +81,6 @@ __STATIC_FORCEINLINE void mpu_setup_region(const struct MpuRegionConfig* cfg) {
   WRITE_REG(MPU->RASR, attrs);
 }
 
-// Returns the lowest address the stack is allowed to descend to.
-__STATIC_FORCEINLINE usize mpu_get_stack_limit(void) {
-  extern u32 _estack, _Min_Stack_Size;
-  return (usize)&_estack - (usize)&_Min_Stack_Size;
-}
-
 void mpu_init(void) {
   // PM0214 section 4.2.4 recommends disabling the interrupts while programming the MPU.
   u32 primask = __get_PRIMASK();
@@ -151,12 +145,12 @@ void mpu_init(void) {
     .shareable = 1,
   });
 
-  usize stack_limit = mpu_get_stack_limit();
+  extern u32 __stack_start[];
   // Stack barrier: Strongly-ordered?
   mpu_setup_region(&(struct MpuRegionConfig){
     .number = MPU_REGION_STACK_BARRIER,
-    .base_addr = stack_limit,
-    .end_addr = stack_limit + MPU_REGION_STACK_BARRIER_SIZE - 1,
+    .base_addr = (usize)__stack_start,
+    .end_addr = (usize)__stack_start + MPU_REGION_STACK_BARRIER_SIZE - 1,
     .executable = 0,
     .permissions = MPU_REGION_NO_ACCESS,
     // Unsure about these attributes. Well, this region definitely has to be
@@ -278,7 +272,8 @@ mpu_diagnose_memfault(usize address, bool instruction_access, bool privileged_ac
     return MPU_FAULT_NULL_POINTER;
   }
 
-  usize stack_limit = mpu_get_stack_limit();
+  extern u32 __stack_start[];
+  usize stack_limit = (usize)__stack_start;
   if (stack_limit <= address && address < stack_limit + MPU_REGION_STACK_BARRIER_SIZE) {
     return MPU_FAULT_STACK_OVERFLOW;
   }
