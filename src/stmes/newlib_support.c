@@ -13,6 +13,13 @@
 #include <sys/lock.h>
 #include <unistd.h>
 
+// Define fallbacks for _init/_fini as weak symbols, so that linking doesn't
+// fail in case the crt*.o objects are missing.
+void _init(void);
+void _fini(void);
+__WEAK void _init(void) {}
+__WEAK void _fini(void) {}
+
 __USED void* _sbrk(ptrdiff_t incr) {
   extern u32 __heap_start[], __heap_end[]; // These are defined by the linker script
   // Static initializers are allowed to reference addresses of other symbols

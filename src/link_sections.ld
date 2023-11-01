@@ -48,7 +48,7 @@ SECTIONS {
     PROVIDE(__text_end = .);
   } > flash
 
-  /* Read-only global variables */
+  /* Read-only global variables, constants, strings */
   .rodata : {
     *(.rodata .rodata.* .gnu.linkonce.r.*)
   } > flash

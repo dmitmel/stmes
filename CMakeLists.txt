@@ -102,6 +102,51 @@ set(arch_flags
 add_compile_options(${arch_flags})
 add_link_options(${arch_flags})
 
+# Clang doesn't come with a standard library for every target out there, so we
+# piggyback off the ARM GCC toolchain and its libraries.
+# <https://interrupt.memfault.com/blog/arm-cortexm-with-llvm-clang>
+# <https://github.com/vpetrigo/arm-cmake-toolchains/blob/b0479f74099e933d8bedb303cb7a4863e5cd9909/clang_utils.cmake>
+# <https://github.com/vpetrigo/arm-cmake-toolchains/blob/b0479f74099e933d8bedb303cb7a4863e5cd9909/clang-arm-gcc-toolchain.cmake>
+if(CMAKE_C_COMPILER_ID STREQUAL "Clang" AND DEFINED TOOLCHAIN_TARGET)
+  find_program(TOOLCHAIN_GCC "${TOOLCHAIN_TARGET}-gcc")
+  if(NOT TOOLCHAIN_GCC)
+    message(FATAL_ERROR "${TOOLCHAIN_TARGET}-gcc could not be found")
+  endif()
+
+  # NOTE: The library paths depend on the exact target architecture flags.
+  function(toolchain_gcc_query_path out_var print_flag)
+    if(NOT DEFINED "${out_var}" OR NOT "${${out_var}_ARCH_FLAGS}" STREQUAL "${arch_flags}")
+      execute_process(
+        COMMAND "${TOOLCHAIN_GCC}" ${arch_flags} ${print_flag}
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        OUTPUT_VARIABLE output
+        ERROR_VARIABLE error_output
+        RESULT_VARIABLE exit_code
+      )
+      if(NOT exit_code EQUAL 0)
+        message(FATAL_ERROR "${error_output}")
+      endif()
+      file(TO_CMAKE_PATH "${output}" path)
+      set("${out_var}" "${path}" CACHE INTERNAL "" FORCE)
+      set("${out_var}_ARCH_FLAGS" "${arch_flags}" CACHE INTERNAL "" FORCE)
+      message(STATUS "${out_var}: ${path}")
+    endif()
+  endfunction()
+
+  toolchain_gcc_query_path(TOOLCHAIN_GCC_SYSROOT -print-sysroot)
+  toolchain_gcc_query_path(TOOLCHAIN_GCC_MULTI_DIR -print-multi-directory)
+  toolchain_gcc_query_path(TOOLCHAIN_GCC_LIBGCC_FILE -print-libgcc-file-name)
+
+  # Strictly speaking, you are allowed to set the sysroot only in the toolchain
+  # script, but eh, whatever.
+  set(CMAKE_SYSROOT "${TOOLCHAIN_GCC_SYSROOT}")
+  get_filename_component(TOOLCHAIN_GCC_LIBGCC_DIR "${TOOLCHAIN_GCC_LIBGCC_FILE}" DIRECTORY)
+  link_directories(
+    "${TOOLCHAIN_GCC_LIBGCC_DIR}" "${TOOLCHAIN_GCC_SYSROOT}/lib/${TOOLCHAIN_GCC_MULTI_DIR}"
+  )
+  add_link_options(-rtlib=libgcc)  # Use libgcc instead of Clang's compiler-rt
+endif()
+
 # Configure the compiler to emit a separate section for every function or
 # global variable in the compiled object file. This will enable the linker to
 # construct a dependency graph of symbols which are actually used by the
@@ -118,22 +163,28 @@ add_link_options(LINKER:--gc-sections)
 #include(CheckIPOSupported)
 #check_ipo_supported(RESULT CMAKE_INTERPROCEDURAL_OPTIMIZATION)
 
-# GCC optimization options list:
-# <https://gcc.gnu.org/onlinedocs/gcc/Optimize-Options.html>
-# <https://github.com/gcc-mirror/gcc/blob/releases/gcc-13.1.0/gcc/opts.cc#L566>
 add_compile_options(
   $<$<CONFIG:Debug>:-Og>
-  # Throw in some flags that are not enabled by -Og
-  $<$<CONFIG:Debug>:-fif-conversion>  # Convert ifs into branchless equivalents
-  $<$<CONFIG:Debug>:-fif-conversion2>  # Convert ifs into instructions with condition flags
-  $<$<CONFIG:Debug>:-fmove-loop-invariants>  # Moves and reuses common loads out of if branches and loops
   $<$<CONFIG:MinSizeRel>:-Os>
   $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O2>
   # Enable level 3 debugging information for GDB, which among other things
   # includes macros. This, however, incrases the object file sizes by 50 times.
   # Oh no. By default only level 2 is enabled.
   $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:-ggdb3>
+  -fomit-frame-pointer
 )
+
+if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+  # GCC optimization options list:
+  # <https://gcc.gnu.org/onlinedocs/gcc/Optimize-Options.html>
+  # <https://github.com/gcc-mirror/gcc/blob/releases/gcc-13.1.0/gcc/opts.cc#L566>
+  add_compile_options(
+    # Throw in some flags that are not enabled by -Og
+    $<$<CONFIG:Debug>:-fif-conversion>  # Convert ifs into branchless equivalents
+    $<$<CONFIG:Debug>:-fif-conversion2>  # Convert ifs into instructions with condition flags
+    $<$<CONFIG:Debug>:-fmove-loop-invariants>  # Moves and reuses common loads out of if branches and loops
+  )
+endif()
 
 add_compile_definitions(
   $<$<NOT:$<CONFIG:Debug>>:NDEBUG>
@@ -259,6 +310,8 @@ endif()
 # needs a check.
 check_c_linker_flag(LINKER:--print-memory-usage HAVE_LINK_FLAG_PRINT_MEMORY_USAGE)
 if(HAVE_LINK_FLAG_PRINT_MEMORY_USAGE)
+  # TODO: Our own utility for displaying memory usage summary
+  # <https://github.com/platformio/platformio-core/blob/v6.1.11/platformio/builder/tools/pioupload.py>
   target_link_options(firmware PRIVATE LINKER:--print-memory-usage)
 else()
   # Use a fallback for linkers that don't support it:

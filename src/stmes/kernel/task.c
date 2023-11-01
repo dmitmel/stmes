@@ -390,7 +390,7 @@ static __NO_RETURN __NAKED void task_launchpad(__UNUSED void* user_data, __UNUSE
   __ASM volatile("blx r1");
   __ASM volatile("bl %0" ::"i"(&task_exit));
   // The task has been terminated, a return here must cause a fault.
-  __ASM volatile("udf");
+  __ASM volatile("udf #0");
 }
 
 void task_spawn(struct Task* task, const struct TaskParams* params) {

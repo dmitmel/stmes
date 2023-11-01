@@ -49,7 +49,7 @@ __NAKED void Reset_Handler(void) {
   // Call the prestart() function.
   __ASM volatile("bl %0" ::"i"(&prestart));
   // Execution should never return here, trigger an exception if it did.
-  __ASM volatile("udf");
+  __ASM volatile("udf #0");
 }
 
 // Performs the early boot sequence and eventually calls main().

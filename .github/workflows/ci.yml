@@ -9,15 +9,27 @@ jobs:
       fail-fast: false
       matrix:
         build_type: [Debug, Release]
+        compiler: [gcc]
+        include:
+          - build_type: Debug
+            compiler: clang
 
     steps:
       - uses: actions/checkout@v4
       - uses: carlosperate/arm-none-eabi-gcc-action@v1
       - run: pip install elf-size-analyze
+      - if: matrix.compiler == 'clang'
+        run: sudo apt-get update && sudo apt-get install llvm
       - uses: actions/cache@v3
         with:
-          path: target
-          key: v1-${{github.workflow}}-${{runner.os}}-${{matrix.build_type}}-cmake
-      - run: cmake -B 'target/${{matrix.build_type}}' -DCMAKE_BUILD_TYPE='${{matrix.build_type}}' -DDEPENDENCIES_DIR='target/_deps' -DUPLOAD_TOOL=OFF -DCMAKE_COLOR_DIAGNOSTICS=ON
+          path: target/_deps
+          key: v1/${{github.workflow}}/${{runner.os}}/cmake/${{matrix.compiler}}/${{matrix.build_type}}
+      - run: |
+          cmake -B 'target/${{matrix.build_type}}' \
+            -DCMAKE_BUILD_TYPE='${{matrix.build_type}}' \
+            -DDEPENDENCIES_DIR='target/_deps' \
+            -DUPLOAD_TOOL=OFF \
+            -DCMAKE_COLOR_DIAGNOSTICS=ON \
+            -DCMAKE_TOOLCHAIN_FILE='cmake/arm_${{matrix.compiler}}_toolchain.cmake'
       - run: cmake --build 'target/${{matrix.build_type}}' --config '${{matrix.build_type}}' --parallel "$(nproc)"
       - run: elf-size-analyze --rom --ram 'target/${{matrix.build_type}}/firmware.elf'
