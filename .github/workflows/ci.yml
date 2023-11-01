@@ -16,6 +16,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      - run: echo "::add-matcher::.github/workflows/gcc_matcher.json"
       - uses: carlosperate/arm-none-eabi-gcc-action@v1
       - run: pip install elf-size-analyze
       - if: matrix.compiler == 'clang'
