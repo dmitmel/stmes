@@ -478,106 +478,82 @@ static void crash_screen_hardfault_title(void) {
 }
 
 static void crash_screen_hardfault_reason(void) {
+  static const struct __packed FaultDescriptor {
+    enum __packed FaultRegister { CFSR, HFSR } reg;
+    u32 mask;
+    const char* str;
+    enum __packed FaultPrintAddress { PRINT_NOTHING, PRINT_PC, PRINT_MMFAR, PRINT_BFAR } print;
+  } FAULT_DESCRIPTORS[] = {
+
+    { CFSR, SCB_CFSR_IACCVIOL_Msk, "IACCVIOL/Instruction access violation on ", PRINT_PC },
+    { CFSR, SCB_CFSR_DACCVIOL_Msk, "DACCVIOL/Data access violation on ", PRINT_MMFAR },
+    { CFSR, SCB_CFSR_MUNSTKERR_Msk, "MUNSTKERR/MemFault during unstacking after exception", 0 },
+    { CFSR, SCB_CFSR_MSTKERR_Msk, "MSTKERR/MemFault during stacking before exception", 0 },
+    { CFSR, SCB_CFSR_MLSPERR_Msk, "MLSPERR/MemFault during floating-point state stacking", 0 },
+
+    { CFSR, SCB_CFSR_IBUSERR_Msk, "IBUSERR/Bus error during instruction prefetch", 0 },
+    { CFSR, SCB_CFSR_PRECISERR_Msk, "PRECISERR/Bus error on access to ", PRINT_BFAR },
+    { CFSR, SCB_CFSR_IMPRECISERR_Msk, "IMPRECISERR/Imprecise bus error", 0 },
+    { CFSR, SCB_CFSR_UNSTKERR_Msk, "UNSTKERR/Bus error during unstacking after exception", 0 },
+    { CFSR, SCB_CFSR_STKERR_Msk, "STKERR/Bus error during stacking before exception", 0 },
+    { CFSR, SCB_CFSR_LSPERR_Msk, "LSPERR/Bus error during floating-point state stacking", 0 },
+
+    { CFSR, SCB_CFSR_UNDEFINSTR_Msk, "UNDEFINSTR/Undefined instruction at ", PRINT_PC },
+    { CFSR,
+      SCB_CFSR_INVSTATE_Msk,
+      "INVSTATE/Attempt to enter invalid execution state\n"
+      "(Most likely caused by a jump to an address without\n"
+      "the thumb mode bit set)",
+      0 },
+    { CFSR, SCB_CFSR_INVPC_Msk, "INVPC/Invalid value of LR on return from exception", 0 },
+    { CFSR, SCB_CFSR_NOCP_Msk, "NOCP/Coprocessor is not available", 0 },
+    { CFSR, SCB_CFSR_UNALIGNED_Msk, "UNALIGNED/Unaligned access to address ", PRINT_MMFAR },
+    { CFSR, SCB_CFSR_DIVBYZERO_Msk, "DIVBYZERO/Division by zero error", 0 },
+
+    { HFSR, SCB_HFSR_VECTTBL_Msk, "VECTTBL/Failed to fetch an address from vector table", 0 },
+    { HFSR, SCB_HFSR_DEBUGEVT_Msk, "DEBUGEVT/The debug system is disabled", 0 },
+
+  };
+
   struct CrashHardfault* ctx = &crash_context.payload.hardfault;
   struct CrashCpuRegisters* regs = &crash_context.cpu_registers;
-  u32 cfsr = ctx->cfsr, hfsr = ctx->hfsr;
-
-  if (cfsr & SCB_CFSR_IACCVIOL_Msk) {
-    console_print("IACCVIOL/Instruction access violation on "), print_address(regs->pc);
-    console_putchar('\n');
-  }
-  if (cfsr & SCB_CFSR_DACCVIOL_Msk) {
-    console_print("DACCVIOL/Data access violation on "), print_address(ctx->mmfar);
-    console_putchar('\n');
-  }
-  if (cfsr & SCB_CFSR_MUNSTKERR_Msk) {
-    console_print("MUNSTKERR/MemFault during unstacking after exception\n");
-  }
-  if (cfsr & SCB_CFSR_MSTKERR_Msk) {
-    console_print("MSTKERR/MemFault during stacking before exception\n");
-  }
-  if (cfsr & SCB_CFSR_MLSPERR_Msk) {
-    console_print("MLSPERR/MemFault during floating-point state stacking\n");
-  }
-
-  if (cfsr & SCB_CFSR_IBUSERR_Msk) {
-    console_print("IBUSERR/Bus error during instruction prefetch\n");
-  }
-  if (cfsr & SCB_CFSR_PRECISERR_Msk) {
-    console_print("PRECISERR/Bus error on access to "), print_address(ctx->bfar);
-    console_putchar('\n');
-  }
-  if (cfsr & SCB_CFSR_IMPRECISERR_Msk) {
-    console_print("IMPRECISERR/Imprecise bus error\n");
-  }
-  if (cfsr & SCB_CFSR_UNSTKERR_Msk) {
-    console_print("UNSTKERR/Bus error during unstacking after exception\n");
-  }
-  if (cfsr & SCB_CFSR_STKERR_Msk) {
-    console_print("STKERR/Bus error during stacking before exception\n");
-  }
-  if (cfsr & SCB_CFSR_LSPERR_Msk) {
-    console_print("LSPERR/Bus error during floating-point state stacking\n");
-  }
-
-  if (cfsr & SCB_CFSR_UNDEFINSTR_Msk) {
-    console_print("UNDEFINSTR/Undefined instruction at "), print_address(regs->pc);
-    console_putchar('\n');
-  }
-  if (cfsr & SCB_CFSR_INVSTATE_Msk) {
-    console_print("INVSTATE/Attempt to enter invalid execution state\n");
-    console_print("(Most likely caused by a jump to an address without\n");
-    console_print("the thumb mode bit set)\n");
-  }
-  if (cfsr & SCB_CFSR_INVPC_Msk) {
-    console_print("INVPC/Invalid value of LR on return from exception\n");
-  }
-  if (cfsr & SCB_CFSR_NOCP_Msk) {
-    console_print("NOCP/Coprocessor is not available\n");
-  }
-  if (cfsr & SCB_CFSR_UNALIGNED_Msk) {
-    if (cfsr & SCB_CFSR_MMARVALID_Msk) {
-      console_print("UNALIGNED/Unaligned access to address ");
-      print_address(ctx->mmfar);
-    } else {
-      console_print("UNALIGNED/Unaligned access to unknown address\n");
+  const u32 registers[] = { [CFSR] = ctx->cfsr, [HFSR] = ctx->hfsr };
+  const u32 addresses[] = {
+    [PRINT_PC] = regs->pc, [PRINT_MMFAR] = ctx->mmfar, [PRINT_BFAR] = ctx->bfar
+  };
+  for (usize i = 0; i < SIZEOF(FAULT_DESCRIPTORS); i++) {
+    const struct FaultDescriptor* desc = &FAULT_DESCRIPTORS[i];
+    if ((registers[desc->reg] & desc->mask) != 0) {
+      console_print(desc->str);
+      if (desc->print != PRINT_NOTHING) {
+        print_address(addresses[desc->print]);
+      }
+      console_putchar('\n');
     }
-  }
-  if (cfsr & SCB_CFSR_DIVBYZERO_Msk) {
-    console_print("DIVBYZERO/Division by zero error\n");
-  }
-
-  if (hfsr & SCB_HFSR_VECTTBL_Msk) {
-    console_print("VECTTBL/Failed to fetch an address from vector table\n");
-  }
-  if (hfsr & SCB_HFSR_DEBUGEVT_Msk) {
-    console_print("DEBUGEVT/The debug system is disabled\n");
   }
 }
 
 static void crash_screen_mpu_diagnosis(void) {
   struct CrashHardfault* ctx = &crash_context.payload.hardfault;
-  if (ctx->mpu_diagnosis) {
-    console_print("MPU//");
-    switch (ctx->mpu_diagnosis) {
-      case MPU_FAULT_UNKNOWN: console_print("unknown\n"); break;
-      case MPU_FAULT_NULL_POINTER: console_print("NULL pointer error\n"); break;
-      case MPU_FAULT_STACK_OVERFLOW: console_print("stack overflow\n"); break;
-      case MPU_FAULT_NOT_MAPPED: console_print("access into an unmapped region\n"); break;
-      case MPU_FAULT_ACCESS_BLOCKED: console_print("access into region is blocked\n"); break;
-      case MPU_FAULT_WRITE_TO_READONLY: console_print("write to a readonly region\n"); break;
-      case MPU_FAULT_NOT_EXECUTABLE: console_print("jump into a non-executable region\n"); break;
-      case MPU_FAULT_UNPRIV_ACCESS_BLOCKED:
-        console_print("unprivileged access into region is blocked\n");
-        break;
-      case MPU_FAULT_UNPRIV_WRITE_TO_READONLY:
-        console_print("region is readonly for unprivileged access\n");
-        break;
-      case MPU_FAULT_UNPRIV_NOT_EXECUTABLE:
-        console_print("unprivileged execution from region is blocked\n");
-        break;
-    }
-  }
+  enum MpuFaultDiagnosis diag = ctx->mpu_diagnosis;
+  if (diag == MPU_FAULT_UNKNOWN) return;
+  static const char* MPU_DIAGNOSES_STRINGS[] = {
+    [MPU_FAULT_UNKNOWN] = "unknown",
+    [MPU_FAULT_NULL_POINTER] = "NULL pointer error",
+    [MPU_FAULT_STACK_OVERFLOW] = "stack overflow",
+    [MPU_FAULT_NOT_MAPPED] = "access into an unmapped region",
+    [MPU_FAULT_ACCESS_BLOCKED] = "access into region is blocked",
+    [MPU_FAULT_WRITE_TO_READONLY] = "write to a readonly region",
+    [MPU_FAULT_NOT_EXECUTABLE] = "jump into a non-executable region",
+    [MPU_FAULT_UNPRIV_ACCESS_BLOCKED] = "unprivileged access into region is blocked",
+    [MPU_FAULT_UNPRIV_WRITE_TO_READONLY] = "region is readonly for unprivileged access",
+    [MPU_FAULT_UNPRIV_NOT_EXECUTABLE] = "unprivileged execution from region is blocked",
+  };
+  const char* str = diag < SIZEOF(MPU_DIAGNOSES_STRINGS) ? MPU_DIAGNOSES_STRINGS[diag] : NULL;
+  if (str == NULL) return;
+  console_print("MPU//");
+  console_print(str);
+  console_putchar('\n');
 }
 
 __NO_RETURN void enter_crash_screen(void) {
@@ -640,22 +616,14 @@ __NO_RETURN void enter_crash_screen(void) {
   }
 
   if (crash_context.cpu_registers_collected) {
-    print_register("r0", regs->r0), console_putchar(' ');
-    print_register("r1", regs->r1), console_putchar(' ');
-    print_register("r2", regs->r2), console_putchar(' ');
-    print_register("r3", regs->r3), console_putchar('\n');
-    print_register("r4", regs->r4), console_putchar(' ');
-    print_register("r5", regs->r5), console_putchar(' ');
-    print_register("r6", regs->r6), console_putchar(' ');
-    print_register("r7", regs->r7), console_putchar('\n');
-    print_register("r8", regs->r8), console_putchar(' ');
-    print_register("r9", regs->r9), console_putchar(' ');
-    print_register("sl", regs->r10), console_putchar(' ');
-    print_register("fp", regs->r11), console_putchar('\n');
-    print_register("ip", regs->r12), console_putchar(' ');
-    print_register("sp", regs->sp), console_putchar(' ');
-    print_register("lr", regs->lr), console_putchar(' ');
-    print_register("pc", regs->pc), console_putchar('\n');
+    static const char REGISTER_NAMES[][3] = {
+      "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7",
+      "r8", "r9", "sl", "fp", "ip", "sp", "lr", "pc",
+    };
+    for (usize i = 0; i < 16; i++) {
+      print_register(REGISTER_NAMES[i], (&regs->r0)[i]);
+      console_putchar((i + 1) % 4 == 0 ? '\n' : ' ');
+    }
     print_register("xPSR", regs->xpsr), console_putchar(' ');
   } else {
     console_print("[CPU registers have not been collected]\n");
