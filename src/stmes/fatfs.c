@@ -172,29 +172,30 @@ DRESULT disk_ioctl(BYTE pdrv, BYTE cmd, void* out) {
 }
 
 __NO_RETURN void crash_on_fs_error(FRESULT code, const char* file, u32 line) {
-  static const char* const ERROR_NAMES[] = {
-    [FR_OK] = "OK",
-    [FR_DISK_ERR] = "DISK_ERR",
-    [FR_INT_ERR] = "INT_ERR",
-    [FR_NOT_READY] = "NOT_READY",
-    [FR_NO_FILE] = "NO_FILE",
-    [FR_NO_PATH] = "NO_PATH",
-    [FR_INVALID_NAME] = "INVALID_NAME",
-    [FR_DENIED] = "DENIED",
-    [FR_EXIST] = "EXIST",
-    [FR_INVALID_OBJECT] = "INVALID_OBJECT",
-    [FR_WRITE_PROTECTED] = "WRITE_PROTECTED",
-    [FR_INVALID_DRIVE] = "INVALID_DRIVE",
-    [FR_NOT_ENABLED] = "NOT_ENABLED",
-    [FR_NO_FILESYSTEM] = "NO_FILESYSTEM",
-    [FR_MKFS_ABORTED] = "MKFS_ABORTED",
-    [FR_TIMEOUT] = "TIMEOUT",
-    [FR_LOCKED] = "LOCKED",
-    [FR_NOT_ENOUGH_CORE] = "NOT_ENOUGH_CORE",
-    [FR_TOO_MANY_OPEN_FILES] = "TOO_MANY_OPEN_FILES",
-    [FR_INVALID_PARAMETER] = "INVALID_PARAMETER",
-  };
-  const char* name = (u32)code < SIZEOF(ERROR_NAMES) ? ERROR_NAMES[code] : "UNKNOWN";
+  const char* name;
+  switch (code) {
+    case FR_OK: name = "OK"; break;
+    case FR_DISK_ERR: name = "DISK_ERR"; break;
+    case FR_INT_ERR: name = "INT_ERR"; break;
+    case FR_NOT_READY: name = "NOT_READY"; break;
+    case FR_NO_FILE: name = "NO_FILE"; break;
+    case FR_NO_PATH: name = "NO_PATH"; break;
+    case FR_INVALID_NAME: name = "INVALID_NAME"; break;
+    case FR_DENIED: name = "DENIED"; break;
+    case FR_EXIST: name = "EXIST"; break;
+    case FR_INVALID_OBJECT: name = "INVALID_OBJECT"; break;
+    case FR_WRITE_PROTECTED: name = "WRITE_PROTECTED"; break;
+    case FR_INVALID_DRIVE: name = "INVALID_DRIVE"; break;
+    case FR_NOT_ENABLED: name = "NOT_ENABLED"; break;
+    case FR_NO_FILESYSTEM: name = "NO_FILESYSTEM"; break;
+    case FR_MKFS_ABORTED: name = "MKFS_ABORTED"; break;
+    case FR_TIMEOUT: name = "TIMEOUT"; break;
+    case FR_LOCKED: name = "LOCKED"; break;
+    case FR_NOT_ENOUGH_CORE: name = "NOT_ENOUGH_CORE"; break;
+    case FR_TOO_MANY_OPEN_FILES: name = "TOO_MANY_OPEN_FILES"; break;
+    case FR_INVALID_PARAMETER: name = "INVALID_PARAMETER"; break;
+    default: name = "UNKNOWN";
+  }
   char msg[32];
   snprintf(msg, sizeof(msg), "0x%02" PRIX32 "/FR_%s", (u32)code, name);
   crash(msg, file, line);

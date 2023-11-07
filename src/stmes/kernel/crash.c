@@ -537,19 +537,25 @@ static void crash_screen_mpu_diagnosis(void) {
   struct CrashHardfault* ctx = &crash_context.payload.hardfault;
   enum MpuFaultDiagnosis diag = ctx->mpu_diagnosis;
   if (diag == MPU_FAULT_UNKNOWN) return;
-  static const char* MPU_DIAGNOSES_STRINGS[] = {
-    [MPU_FAULT_UNKNOWN] = "unknown",
-    [MPU_FAULT_NULL_POINTER] = "NULL pointer error",
-    [MPU_FAULT_STACK_OVERFLOW] = "stack overflow",
-    [MPU_FAULT_NOT_MAPPED] = "access into an unmapped region",
-    [MPU_FAULT_ACCESS_BLOCKED] = "access into region is blocked",
-    [MPU_FAULT_WRITE_TO_READONLY] = "write to a readonly region",
-    [MPU_FAULT_NOT_EXECUTABLE] = "jump into a non-executable region",
-    [MPU_FAULT_UNPRIV_ACCESS_BLOCKED] = "unprivileged access into region is blocked",
-    [MPU_FAULT_UNPRIV_WRITE_TO_READONLY] = "region is readonly for unprivileged access",
-    [MPU_FAULT_UNPRIV_NOT_EXECUTABLE] = "unprivileged execution from region is blocked",
-  };
-  const char* str = diag < SIZEOF(MPU_DIAGNOSES_STRINGS) ? MPU_DIAGNOSES_STRINGS[diag] : NULL;
+  const char* str = NULL;
+  switch (ctx->mpu_diagnosis) {
+    case MPU_FAULT_UNKNOWN: str = "unknown"; break;
+    case MPU_FAULT_NULL_POINTER: str = "NULL pointer error"; break;
+    case MPU_FAULT_STACK_OVERFLOW: str = "stack overflow"; break;
+    case MPU_FAULT_NOT_MAPPED: str = "access into an unmapped region"; break;
+    case MPU_FAULT_ACCESS_BLOCKED: str = "access into region is blocked"; break;
+    case MPU_FAULT_WRITE_TO_READONLY: str = "write to a readonly region"; break;
+    case MPU_FAULT_NOT_EXECUTABLE: str = "jump into a non-executable region"; break;
+    case MPU_FAULT_UNPRIV_ACCESS_BLOCKED:
+      str = "unprivileged access into region is blocked";
+      break;
+    case MPU_FAULT_UNPRIV_WRITE_TO_READONLY:
+      str = "region is readonly for unprivileged access";
+      break;
+    case MPU_FAULT_UNPRIV_NOT_EXECUTABLE:
+      str = "unprivileged execution from region is blocked";
+      break;
+  }
   if (str == NULL) return;
   console_print("MPU//");
   console_print(str);
@@ -668,13 +674,14 @@ __NO_RETURN void enter_crash_screen(void) {
 }
 
 __NO_RETURN void crash_on_hal_error(HAL_StatusTypeDef code, const char* file, u32 line) {
-  static const char* const ERROR_NAMES[] = {
-    [HAL_OK] = "OK",
-    [HAL_ERROR] = "ERROR",
-    [HAL_BUSY] = "BUSY",
-    [HAL_TIMEOUT] = "TIMEOUT",
-  };
-  const char* name = (u32)code < SIZEOF(ERROR_NAMES) ? ERROR_NAMES[code] : "UNKNOWN";
+  const char* name;
+  switch (code) {
+    case HAL_OK: name = "OK"; break;
+    case HAL_ERROR: name = "ERROR"; break;
+    case HAL_BUSY: name = "BUSY"; break;
+    case HAL_TIMEOUT: name = "TIMEOUT"; break;
+    default: name = "UNKNOWN";
+  }
   char msg[32];
   snprintf(msg, sizeof(msg), "0x%02" PRIX32 "/HAL_%s", (u32)code, name);
   crash(msg, file, line);

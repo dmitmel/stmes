@@ -9,3 +9,4 @@ CompileFlags:
     - '-fif-conversion'
     - '-fif-conversion2'
     - '-fmove-loop-invariants'
+    - '-ftree-switch-conversion'

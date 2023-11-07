@@ -183,6 +183,7 @@ if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
     $<$<CONFIG:Debug>:-fif-conversion>  # Convert ifs into branchless equivalents
     $<$<CONFIG:Debug>:-fif-conversion2>  # Convert ifs into instructions with condition flags
     $<$<CONFIG:Debug>:-fmove-loop-invariants>  # Moves and reuses common loads out of if branches and loops
+    $<$<CONFIG:Debug>:-ftree-switch-conversion>  # Converts simple switch statements into lookup tables
   )
 endif()
 
