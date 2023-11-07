@@ -236,18 +236,12 @@ set_target_properties(firmware PROPERTIES PREFIX "" SUFFIX ".elf")
 # <https://github.com/embeddedartistry/meson-buildsystem/blob/d4de8c83f97cb6389d9895548b555220f9c56e53/compiler/cpp/meson.build#L11-L21>
 # <https://github.com/embeddedartistry/cmake-buildsystem/blob/f442d5ddbdd87f7590cb06cdbf6c319fa119578e/compiler/DefaultCompilerSettings.cmake#L9-L69>
 target_compile_options(firmware PRIVATE
-  -Wall
-  -Wextra
-  -Wpedantic
+  -Wall -Wextra -Wpedantic -pedantic-errors
   -Werror=return-type
   -Wdouble-promotion
   -Wmissing-declarations
   -Werror=float-conversion
-  $<$<COMPILE_LANGUAGE:C>:-Werror=implicit-function-declaration>
   $<$<COMPILE_LANGUAGE:C>:-Werror=strict-prototypes>
-  $<$<COMPILE_LANGUAGE:C>:-Werror=incompatible-pointer-types>
-  $<$<COMPILE_LANGUAGE:C>:-Werror=implicit-int>
-  $<$<COMPILE_LANGUAGE:C>:-Werror=int-conversion>
 )
 
 target_link_libraries(firmware PUBLIC
