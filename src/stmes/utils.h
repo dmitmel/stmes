@@ -82,68 +82,6 @@ void fast_memcpy_u32(u32* dst, const u32* src, usize n);
 #define WAIT_FOR_EVENT() __WFE()
 #define WAIT_FOR_INTERRUPT() __WFI()
 
-#define __ldmia2(ptr, r1, r2, a, b)                                                              \
-  do {                                                                                           \
-    register u32 __a __ASM(r1);                                                                  \
-    register u32 __b __ASM(r2);                                                                  \
-    register u32* __ptr = *(ptr);                                                                \
-    __ASM("ldmia   %0!, {%1, %2}" : "+r"(__ptr), "=r"(__a), "=r"(__b) : "m"(*(u32(*)[2])__ptr)); \
-    *(ptr) = __ptr, *(a) = __a, *(b) = __b;                                                      \
-  } while (0)
-
-#define __ldmia4(ptr, r1, r2, r3, r4, a, b, c, d)                   \
-  do {                                                              \
-    register u32 __a __ASM(r1);                                     \
-    register u32 __b __ASM(r2);                                     \
-    register u32 __c __ASM(r3);                                     \
-    register u32 __d __ASM(r4);                                     \
-    register u32* __ptr = *(ptr);                                   \
-    __ASM("ldmia   %0!, {%1, %2, %3, %4}"                           \
-          : "+r"(__ptr), "=r"(__a), "=r"(__b), "=r"(__c), "=r"(__d) \
-          : "m"(*(u32(*)[4])__ptr));                                \
-    *(ptr) = __ptr, *(a) = __a, *(b) = __b, *(c) = __c, *(d) = __d; \
-  } while (0)
-
-#define __ldmia8(ptr, r1, r2, r3, r4, r5, r6, r7, r8, a, b, c, d, e, f, g, h) \
-  do {                                                                        \
-    register u32 __a __ASM(r1);                                               \
-    register u32 __b __ASM(r2);                                               \
-    register u32 __c __ASM(r3);                                               \
-    register u32 __d __ASM(r4);                                               \
-    register u32 __e __ASM(r5);                                               \
-    register u32 __f __ASM(r6);                                               \
-    register u32 __g __ASM(r7);                                               \
-    register u32 __h __ASM(r8);                                               \
-    register u32* __ptr = *(ptr);                                             \
-    __ASM("ldmia   %0!, {%1, %2, %3, %4, %5, %6, %7, %8}"                     \
-          : "+r"(__ptr),                                                      \
-            "=r"(__a),                                                        \
-            "=r"(__b),                                                        \
-            "=r"(__c),                                                        \
-            "=r"(__d),                                                        \
-            "=r"(__e),                                                        \
-            "=r"(__f),                                                        \
-            "=r"(__g),                                                        \
-            "=r"(__h)                                                         \
-          : "m"(*(u32(*)[8])__ptr));                                          \
-    *(ptr) = __ptr;                                                           \
-    *(a) = __a, *(b) = __b, *(c) = __c, *(d) = __d;                           \
-    *(e) = __e, *(f) = __f, *(g) = __g, *(h) = __h;                           \
-  } while (0)
-
-#define __stmia4(ptr, r1, r2, r3, r4, a, b, c, d)    \
-  do {                                               \
-    register u32 __a __ASM(r1) = (a);                \
-    register u32 __b __ASM(r2) = (b);                \
-    register u32 __c __ASM(r3) = (c);                \
-    register u32 __d __ASM(r4) = (d);                \
-    register u32* __ptr = *(ptr);                    \
-    __ASM("stmia   %1!, {%2, %3, %4, %5}"            \
-          : "=m"(*(u32(*)[4])__ptr), "+r"(__ptr)     \
-          : "r"(__a), "r"(__b), "r"(__c), "r"(__d)); \
-    *(ptr) = __ptr;                                  \
-  } while (0)
-
 #define BITBAND_ADDR(base, bb_base, addr, bit) \
   ((volatile u32*)(bb_base + 32ul * ((usize)(addr) - (base)) + 4ul * (bit)))
 #define SRAM1_BITBAND_ADDR(addr, bit) BITBAND_ADDR(SRAM1_BASE, SRAM1_BB_BASE, addr, bit)

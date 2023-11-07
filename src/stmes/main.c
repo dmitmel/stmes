@@ -43,13 +43,16 @@ int main(void) {
 // functions can be executed on boot right away, however, some setup needs to
 // be done first before we can reach main().
 __NAKED void Reset_Handler(void) {
-  // Pass the initial stack pointer as the first argument (the need to be able
-  // to read it is the reason for writing the reset handler in assembly).
-  __ASM volatile("mov r0, sp");
-  // Call the prestart() function.
-  __ASM volatile("bl %0" ::"i"(&prestart));
-  // Execution should never return here, trigger an exception if it did.
-  __ASM volatile("udf #0");
+  __ASM volatile( //
+    // Pass the initial stack pointer as the first argument (the need to be
+    // able to read it is the reason for writing the reset handler in assembly)
+    "mov r0, sp\n\t"
+    // Call the prestart() function.
+    "bl %0\n\t"
+    // Execution should never return here, trigger an exception if it did.
+    "udf #0" :: //
+    "i"(&prestart)
+  );
 }
 
 // Performs the early boot sequence and eventually calls main().
@@ -129,10 +132,10 @@ static __NAKED void main_task_launcher(__UNUSED void* initial_stack_ptr) {
     "msr msp, r0\n\t" // MSP = initial_stack_ptr;
     "isb\n\t"         // apply the changes
     "cpsie i\n\t"     // __enable_irq();
+    // And now, tail-call main() (this is the reason for writing this wrapper
+    // in assembly: to not waste any stack space before even entering main()).
+    "b %0" ::"i"(&main)
   );
-  // And now the main() can be tail-called (this is the reason for writing this
-  // wrapper in assembly: to not waste any stack space before entering main()).
-  __ASM volatile("b %0" ::"i"(&main));
 }
 
 void HAL_MspInit(void) {

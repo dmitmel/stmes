@@ -385,12 +385,16 @@ static void syscall_handler_entry(usize arg1, usize arg2, usize arg3, enum Sysca
 // largely to be a barrier for debugger's stack trace unwinder (by being
 // implemented in assembly and having no hint directives whatsoever).
 static __NO_RETURN __NAKED void task_launchpad(__UNUSED void* user_data, __UNUSED TaskFn* func) {
-  // Call the function passed in the second parameter with the user data as its
-  // first parameter which is already in r0.
-  __ASM volatile("blx r1");
-  __ASM volatile("bl %0" ::"i"(&task_exit));
-  // The task has been terminated, a return here must cause a fault.
-  __ASM volatile("udf #0");
+  __ASM volatile( //
+    // Call the function passed in the second parameter with the user data as
+    // its first parameter which is already in r0.
+    "blx r1\n\t"
+    // Call task_exit() if the task function has returned.
+    "bl %0\n\t"
+    // The task has been terminated, a return here must cause a fault.
+    "udf #0" :: //
+    "i"(&task_exit)
+  );
 }
 
 void task_spawn(struct Task* task, const struct TaskParams* params) {
@@ -637,8 +641,12 @@ static __NAKED void context_switch(__UNUSED enum Syscall syscall_nr) {
 
 __NAKED void PendSV_Handler(void) {
   // The PendSV handler effectively emulates the DEFERRED_YIELD syscall.
-  __ASM volatile("movs r0, %0" ::"n"(SYSCALL_DEFERRED_YIELD));
-  __ASM volatile("b %0" ::"i"(&context_switch));
+  __ASM volatile( //
+    "movs r0, %0\n\t"
+    "b %1" :: //
+    "n"(SYSCALL_DEFERRED_YIELD),
+    "i"(&context_switch)
+  );
 }
 
 __NAKED void SVC_Handler(void) {
