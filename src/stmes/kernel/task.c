@@ -384,8 +384,17 @@ static void syscall_handler_entry(usize arg1, usize arg2, usize arg3, enum Sysca
 // This function is the bottom-most frame of every task stack and exists
 // largely to be a barrier for debugger's stack trace unwinder (by being
 // implemented in assembly and having no hint directives whatsoever).
-static __NO_RETURN __NAKED void task_launchpad(__UNUSED void* user_data, __UNUSED TaskFn* func) {
+static CLANG_ATTRIBUTE(nouwtable) __NO_RETURN __NAKED
+  void task_launchpad(__UNUSED void* user_data, __UNUSED TaskFn* func) {
   __ASM volatile( //
+  // Clang doesn't support the ARM unwinding directives in naked functions.
+  // Well, at least it has an attribute for marking functions as CANTUNWIND.
+#if !defined(__clang__) && ARM_UNWIND_DIRECTIVES
+    // Generate a "refuse to unwind" opcode instead of using the ".cantunwind"
+    // directive to make the runtime stack unwinder stop at this function, but
+    // not ignore it, and include it in the backtrace.
+    ".unwind_raw 0, 0x80, 0x00\n\t"
+#endif
     // Call the function passed in the second parameter with the user data as
     // its first parameter which is already in r0.
     "blx r1\n\t"
@@ -495,13 +504,14 @@ static __NAKED void context_switch(__UNUSED enum Syscall syscall_nr) {
   // can be freely clobbered by us since the hardware will restore them.
   // <https://developer.arm.com/documentation/ddi0439/b/Programmers-Model/Exceptions/Exception-handling>
 
+  // TODO: Add the ARM stack unwinding instructions for this function
   __ASM volatile( //
     // We need to back up the LR register (since we will need its EXC_RETURN
     // value for returning from the exception) before calling the scheduler
     // function, but to keep the stack aligned, another register has to be
     // backed up as well (which will come in handy later).
     "push {r4, lr}\n\t"
-#ifdef CFI_DIRECTIVES
+#if CFI_DIRECTIVES
     // The CFI directives make the assembler put a certain section into the
     // binary that informs the debugger how to unwind the stack and recover
     // local variables in caller frames. They don't generate any machine code
@@ -539,7 +549,7 @@ static __NAKED void context_switch(__UNUSED enum Syscall syscall_nr) {
     // otherwise it will be lost:
     "mov r1, r4\n\t"
     "pop {r4, lr}\n\t"
-#ifdef CFI_DIRECTIVES
+#if CFI_DIRECTIVES
     // Here come the CFI directives once again, this time to inform the
     // debugger that the values of the backed up registers are the same that
     // they were at the beginning of the function.
@@ -585,7 +595,7 @@ static __NAKED void context_switch(__UNUSED enum Syscall syscall_nr) {
     // Handler mode, and we always use PSP for tasks anyway) and CONTROL.FPCA
     // are reset upon entering the interrupt.
     "mrs r3, control\n\t"
-#if __FPU_USED == 1
+#if __FPU_USED
     // The bit 4 of EXC_RETURN determines whether the stacked state includes
     // the FPU registers, and thus whether the task has issued any FPU
     // instructions so far.
@@ -615,7 +625,7 @@ static __NAKED void context_switch(__UNUSED enum Syscall syscall_nr) {
     // Pop the other task's core registers from its stack, its value of the
     // CONTROL register into r3 and its EXC_RETURN value into LR.
     "ldmia r2!, {r3, r4-r11, lr}\n\t"
-#if __FPU_USED == 1
+#if __FPU_USED
     // Reload the next task's floating-point context. See the note about
     // preserving it above.
     "tst lr, #16\n\t"
@@ -672,6 +682,7 @@ __NAKED void SVC_Handler(void) {
   // tail-chained, the register values will be those at the point of the `SVC`
   // instruction.
 
+  // TODO: Add the ARM stack unwinding instructions for this function
   __ASM volatile( //
     // The bit 2 of LR specifies which stack was in use prior to entering the
     // interrupt. Use it to figure out whether the caller was using MSP or PSP.
@@ -698,7 +709,7 @@ __NAKED void SVC_Handler(void) {
     // The normal syscall entry path. Save the LR and the syscall number before
     // calling the handler.
     "push {r0, lr}\n\t"
-#ifdef CFI_DIRECTIVES
+#if CFI_DIRECTIVES
     ".cfi_adjust_cfa_offset 8\n\t"
     ".cfi_rel_offset r0, 0\n\t"
     ".cfi_rel_offset lr, 4\n\t"
@@ -720,7 +731,7 @@ __NAKED void SVC_Handler(void) {
     // Restore the LR and the syscall number, loading it into the first
     // argument register.
     "pop {r0, lr}\n\t"
-#ifdef CFI_DIRECTIVES
+#if CFI_DIRECTIVES
     ".cfi_adjust_cfa_offset -8\n\t"
     ".cfi_restore r0\n\t"
     ".cfi_restore lr\n\t"

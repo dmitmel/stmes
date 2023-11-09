@@ -171,6 +171,12 @@ add_compile_options(
   # includes macros. This, however, incrases the object file sizes by 50 times.
   # Oh no. By default only level 2 is enabled.
   $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:-ggdb3>
+  # Getting rid of the frame pointer gives the compiler one more
+  # general-purpose register to work with and makes the function
+  # prologues/epilogues much shorter. The only downside is that a more
+  # complicated stack unwinding strategy must be employed, but we exploit the
+  # exception handling metadata for that. For some reason this option is not
+  # enabled by default on Clang.
   -fomit-frame-pointer
 )
 
@@ -205,14 +211,23 @@ add_compile_options(
   $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>  # Don't generate extra code for exception handling
 )
 
-FetchContent_GetProperties(stm32f4xx_hal_driver)
+# However, generate the metadata for stack unwinding for both C++ and C.
+add_compile_options(-funwind-tables)
+add_compile_definitions(ARM_UNWIND_DIRECTIVES)
+
+if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+  # <https://gcc.gnu.org/onlinedocs/gcc/ARM-Options.html#index-mpoke-function-name>
+  add_compile_options(-mpoke-function-name)
+  add_compile_definitions(ARM_POKE_FUNCTION_NAME)
+endif()
+
 # Substitute file paths with a shorter string in expansions of the `__FILE__`
 # preprocessor variable (most notably used by the assertion macros), which has
 # non-negligible impact on the executable size.
 add_compile_options(
   -fmacro-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=
-  -fmacro-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/src/stmes=stmes
-  -fmacro-prefix-map=${stm32f4xx_hal_driver_SOURCE_DIR}/Src/=
+  -fmacro-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/src/=
+  -fmacro-prefix-map=${DEPENDENCIES_DIR}/stm32f4xx_hal_driver/Src/=
 )
 
 # We are now done with project-wide compilation flags! External dependencies,

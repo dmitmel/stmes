@@ -10,3 +10,4 @@ CompileFlags:
     - '-fif-conversion2'
     - '-fmove-loop-invariants'
     - '-ftree-switch-conversion'
+    - '-mpoke-function-name'

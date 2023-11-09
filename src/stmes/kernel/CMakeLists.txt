@@ -4,4 +4,5 @@ target_sources(firmware PRIVATE
   sync.c
   task.c
   time.c
+  unwind.c
 )

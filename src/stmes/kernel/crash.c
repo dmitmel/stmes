@@ -47,12 +47,6 @@
 // TODO: A CrashReporter API for formatting the error messages after the crash
 // and outputting more contextual information.
 
-// TODO: Backtrace and/or stack unwinder. Some ideas:
-// <https://github.com/armink/CmBacktrace/blob/8d07e7ba078fbd57af89286fc217157bc9a6d2ac/cm_backtrace/cm_backtrace.c>
-// <https://github.com/MarlinFirmware/Marlin/tree/441416728cd7f0e9b6ebf94f895d1d27fe59d25a/Marlin/src/HAL/shared/backtrace>
-// <https://github.com/red-rocket-computing/backtrace>
-// <http://yosefk.com/blog/getting-the-call-stack-without-a-frame-pointer.html>
-
 // TODO: Add more CFI directives to the inline assembly because the debugger
 // probably won't be able to unwind and restore local variables correctly due
 // to us carelessly messing with the registers. More information:
@@ -276,7 +270,7 @@ static u32 hardfault_handler_impl(u32 exc_return, u32 msp, u32 psp) {
   // Bit 2 of EXC_RETURN determines which stack pointer was in use prior to
   // entering the exception handler, which, consequently, contains the frame
   // with the stacked registers.
-  u32 active_sp = (exc_return & BIT(2)) == 0 ? msp : psp;
+  u32 active_sp = READ_BIT(exc_return, BIT(2)) == 0 ? msp : psp;
 
   // See PM0214 section 2.3.7. The hardware ensures correct stack alignment, so
   // this struct doesn't need to have the __PACKED attribute (as suggested by
@@ -303,7 +297,7 @@ static u32 hardfault_handler_impl(u32 exc_return, u32 msp, u32 psp) {
 
   ctx->mpu_diagnosis = MPU_FAULT_UNKNOWN;
   if (ctx->cfsr & SCB_CFSR_MEMFAULTSR_Msk) {
-    u32 ipsr = regs->xpsr & 0x1FF;
+    u32 ipsr = regs->xpsr & MASK(9);
     // This won't tell apart unprivileged load instructions (LDR*T)... Not a
     // big deal though.
     bool privileged = ipsr != 0 || (__get_CONTROL() & CONTROL_nPRIV_Msk) == 0;
@@ -614,7 +608,7 @@ __NO_RETURN void enter_crash_screen(void) {
   console_putchar('\n');
   console_set_color(0x07);
 
-  u32 interrupt_nr = crash_context.cpu_registers.xpsr & 0x1FF;
+  u32 interrupt_nr = crash_context.cpu_registers.xpsr & MASK(9);
   if (interrupt_nr != 0) {
     console_print("[in ISR ");
     print_number(interrupt_nr, 10);

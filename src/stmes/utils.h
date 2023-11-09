@@ -51,6 +51,12 @@ extern "C" {
 #define unlikely(x) (x)
 #endif
 
+#ifdef __clang__
+#define CLANG_ATTRIBUTE(expr) __attribute__((expr))
+#else
+#define CLANG_ATTRIBUTE(expr)
+#endif
+
 #define __WEAK_ALIAS(name) __attribute__((weak, alias(name)))
 #define __ALIAS(name) __attribute__((alias(name)))
 #define __SECTION(name) __attribute__((section(name)))
@@ -112,6 +118,10 @@ i32 humanize_bytes(char* buf, usize buf_size, i64 bytes);
 #define test_bit(x, bit) (((x) & (bit)) != 0)
 #define test_any_bit(x, bit) (((x) & (bit)) != 0)
 #define test_all_bits(x, bit) (((x) & (bit)) == bit)
+#define set_bit(x, bit) ((x) | (bit))
+#define clear_bit(x, bit) ((x) & ~(bit))
+#define read_bit(x, bit) ((x) & (reg))
+#define toggle_bit(x, bit) ((x) ^ (bit))
 
 #ifdef __cplusplus
 }

@@ -60,6 +60,7 @@
 #include <stm32f4xx_ll_rcc.h>
 #include <stm32f4xx_ll_sdmmc.h>
 
+#define SDMMC_DRIVER_LOGS 1
 #define SDMMC_LOG_COMMANDS 0
 
 // The SDIO peripheral has two DMA streams attached to it, DMA2_Stream3 and
@@ -77,6 +78,12 @@
 // clang-format on
 
 #define rca_arg(card) ((u32)(card)->rca << 16)
+
+#if SDMMC_DRIVER_LOGS
+#define sdmmc_log(...) printf(__VA_ARGS__)
+#else
+#define sdmmc_log(...) ((void)0)
+#endif
 
 static struct SdmmcCard sdmmc_card;
 
@@ -254,7 +261,7 @@ u32 sdmmc_init_card(const struct SdmmcHostCapabilities* host_caps) {
     .rca = 0x0000, // The card starts out with a zero RCA.
   };
 
-  printf("enabling the SDIO peripheral\n");
+  sdmmc_log("enabling the SDIO peripheral\n");
 
   __HAL_RCC_SDIO_CLK_ENABLE();
   __HAL_RCC_DMA2_CLK_ENABLE();
@@ -270,7 +277,7 @@ u32 sdmmc_init_card(const struct SdmmcHostCapabilities* host_caps) {
 
   // TODO: Implement card power control through an external voltage regulator.
   // NOTE: The power up procedure is described in section 6.4 "Power scheme".
-  printf("power cycling the card\n");
+  sdmmc_log("power cycling the card\n");
   // Disable the SDIO clock and reset all of its parameters.
   CLEAR_BIT(SDIO->CLKCR, SDIO_CLKCR_CLKEN | CLKCR_CLEAR_MASK);
   // Cut off the power from the SDIO peripheral (the name of this register is a
@@ -304,12 +311,12 @@ u32 sdmmc_init_card(const struct SdmmcHostCapabilities* host_caps) {
   // is covered in great detail in the section 4.2 "Card Identification Mode"
   // of the SD specification, and an overview is given on figures 4-1 and 4-2.
 
-  printf("starting card initialization\n");
+  sdmmc_log("starting card initialization\n");
   Systime init_start_time = systime_now();
 
   // The card here may be in any state if the MCU has been rebooted.
 
-  printf("resetting the card\n");
+  sdmmc_log("resetting the card\n");
   for (u32 attempt = 0; attempt < 10; attempt++) {
     if (!(err = sdmmc_command(SDMMC_CMD0_GO_IDLE_STATE, 0, response))) break;
     task_sleep(1);
@@ -319,7 +326,7 @@ u32 sdmmc_init_card(const struct SdmmcHostCapabilities* host_caps) {
   // After a software reset with CMD0, the card switches to the Idle state.
   // Now, CMD8 must be issued to check support for SD spec v2.00-or-later.
 
-  printf("sending interface conditions... ");
+  sdmmc_log("sending interface conditions... ");
   bool is_v2_x_card;
   union SdmmcIfCond if_cond = { .word = 0 };
   if_cond.bits.check_pattern = 0xAA; // 0b10101010, recommended by the spec
@@ -330,9 +337,9 @@ u32 sdmmc_init_card(const struct SdmmcHostCapabilities* host_caps) {
     // The spec recommends using the check pattern (in addition to the CRC
     // built into the protocol) to test signal integrity.
     if (resp_if_cond.bits.check_pattern == if_cond.bits.check_pattern) {
-      printf("card is at least v2.x\n");
+      sdmmc_log("card is at least v2.x\n");
     } else {
-      printf("check pattern error\n");
+      sdmmc_log("check pattern error\n");
       err = SDMMC_ERROR_CMD_CRC_FAIL;
       goto exit;
     }
@@ -346,7 +353,7 @@ u32 sdmmc_init_card(const struct SdmmcHostCapabilities* host_caps) {
     // voltages, so if the execution has reached here, it really must've been
     // an illegal command.
     is_v2_x_card = false;
-    printf("card is v1.x\n");
+    sdmmc_log("card is v1.x\n");
     // Upon receiving an illegal command, the card will set the ILLEGAL_COMMAND
     // error bit returned in the R1 response of the next command. This bit is
     // reset simply by issuing any other valid command, but in the Idle state
@@ -360,7 +367,7 @@ u32 sdmmc_init_card(const struct SdmmcHostCapabilities* host_caps) {
   // support for High/Extra Capacity cards, and wait until the card reaches
   // the Ready state.
 
-  printf("sending operating conditions...\n");
+  sdmmc_log("sending operating conditions...\n");
   // A timeout of 1 second for initialization with ACMD41 is recommended by the spec.
   deadline = timeout_to_deadline(1000);
   while (true) {
@@ -403,15 +410,15 @@ u32 sdmmc_init_card(const struct SdmmcHostCapabilities* host_caps) {
   }
 
   Systime init_time = systime_now() - init_start_time;
-  printf("initialization completed in %" PRIu32 " ms\n", (u32)systime_as_millis(init_time));
+  sdmmc_log("initialization completed in %" PRIu32 " ms\n", (u32)systime_as_millis(init_time));
 
-  printf("starting card identification\n");
+  sdmmc_log("starting card identification\n");
   Systime ident_start_time = systime_now();
 
   // The card is now in the Ready state. The host now requests its unique CID
   // register by issuing CMD2.
 
-  printf("reading CID data\n");
+  sdmmc_log("reading CID data\n");
   if ((err = sdmmc_command(SDMMC_CMD2_ALL_SEND_CID, 0, response))) goto exit;
   // The words in the CID must be flipped. The individual bytes are fine though.
   card->cid.words[0] = response[3];
@@ -423,10 +430,10 @@ u32 sdmmc_init_card(const struct SdmmcHostCapabilities* host_caps) {
   // state. The host then asks the card to publish its RCA which will be later
   // used for addressing it when transferring data.
 
-  printf("requesting RCA... ");
+  sdmmc_log("requesting RCA... ");
   if ((err = sdmmc_command(SD_CMD3_SEND_RELATIVE_ADDR, 0, response))) goto exit;
   card->rca = (u16)(response[0] >> 16); // Extract the top 16 bits of the response
-  printf("0x%04" PRIX16 "\n", card->rca);
+  sdmmc_log("0x%04" PRIX16 "\n", card->rca);
 
   // NOTE: Strictly speaking the identification procedure is complete - the
   // card now enters the Stand-by state in the data transfer mode. However, a
@@ -435,7 +442,7 @@ u32 sdmmc_init_card(const struct SdmmcHostCapabilities* host_caps) {
   // section 4.3 "Data Transfer Mode" of the spec and on figure 4-13 "SD Memory
   // Card State Diagram".
 
-  printf("reading CSD register\n");
+  sdmmc_log("reading CSD register\n");
   // CMD9 must be issued before selecting the card.
   if ((err = sdmmc_command(SDMMC_CMD9_SEND_CSD, rca_arg(card), response))) goto exit;
   // The words of the CSD must be reversed as well.
@@ -449,17 +456,17 @@ u32 sdmmc_init_card(const struct SdmmcHostCapabilities* host_caps) {
     bytes_str[0] = '\0';
     u32 blocks = sdmmc_get_blocks_count(card);
     humanize_bytes(bytes_str, sizeof(bytes_str), (u64)blocks * SDMMC_BLOCK_SIZE);
-    printf("blocks = %" PRIu32 ", capacity = %sB\n", blocks, bytes_str);
+    sdmmc_log("blocks = %" PRIu32 ", capacity = %sB\n", blocks, bytes_str);
   }
 
-  printf("selecting card 0x%04" PRIX16 "\n", card->rca);
+  sdmmc_log("selecting card 0x%04" PRIX16 "\n", card->rca);
   // Selecting the card moves it to the Transfer state.
   if ((err = sdmmc_command(SDMMC_CMD7_SELECT_CARD, rca_arg(card), response))) goto exit;
 
   // TODO: Check the CARD_IS_LOCKED bit at this point
 
   u32 scr_data[2];
-  printf("reading SCR data\n");
+  sdmmc_log("reading SCR data\n");
   if ((err = sdmmc_command(SDMMC_CMD16_SET_BLOCKLEN, sizeof(scr_data), response))) goto exit;
   // For some reason the SCR is sent via the DAT lines and not, for example,
   // with the long response format R2.
@@ -489,7 +496,7 @@ u32 sdmmc_init_card(const struct SdmmcHostCapabilities* host_caps) {
     case SD_SPEC_V8_X: spec_version_name = "8.00"; break;
     case SD_SPEC_V9_X: spec_version_name = "9.00"; break;
   }
-  printf("card implements specification v%s\n", spec_version_name);
+  sdmmc_log("card implements specification v%s\n", spec_version_name);
 
   // Here comes the most interesting part of the card initialization sequence
   // and what actually makes my driver the fastest: activation of the
@@ -502,13 +509,13 @@ u32 sdmmc_init_card(const struct SdmmcHostCapabilities* host_caps) {
       const u32 ACCESS_MODE_HIGH_SPEED = 1;
 
       struct SdFuncStatus status;
-      printf("checking support of High-Speed mode... ");
+      sdmmc_log("checking support of High-Speed mode... ");
       if ((err = sd_switch_function(false, ACCESS_MODE_GROUP, ACCESS_MODE_HIGH_SPEED, &status))) {
         goto exit;
       }
       if (status.supported && !status.busy && status.selected) {
-        printf("ok\n");
-        printf("switching to High-Speed mode... ");
+        sdmmc_log("ok\n");
+        sdmmc_log("switching to High-Speed mode... ");
         if ((err = sd_switch_function(true, ACCESS_MODE_GROUP, ACCESS_MODE_HIGH_SPEED, &status))) {
           goto exit;
         }
@@ -516,9 +523,9 @@ u32 sdmmc_init_card(const struct SdmmcHostCapabilities* host_caps) {
           // The specification requires the host to wait for at least 8 clocks
           // after CMD8 before making use of the new functions.
           task_sleep(1);
-          printf("ok\n");
+          sdmmc_log("ok\n");
         } else {
-          printf("fail\n");
+          sdmmc_log("fail\n");
         }
 
         // Confirm the success of the switch by refreshing the CSD register.
@@ -527,7 +534,7 @@ u32 sdmmc_init_card(const struct SdmmcHostCapabilities* host_caps) {
         // is accepted only in the Stand-by state, so the card must be first
         // deselected, and then re-selected again afterwards to be returned to
         // the Transfer state.
-        printf("reading CSD register\n");
+        sdmmc_log("reading CSD register\n");
         if ((err = sdmmc_command(SDMMC_CMD7_DESELECT_CARD, 0, response))) goto exit;
         if ((err = sdmmc_command(SDMMC_CMD9_SEND_CSD, rca_arg(card), response))) goto exit;
         card->csd.words[0] = response[3];
@@ -536,14 +543,14 @@ u32 sdmmc_init_card(const struct SdmmcHostCapabilities* host_caps) {
         card->csd.words[3] = response[0];
         if ((err = sdmmc_command(SDMMC_CMD7_SELECT_CARD, rca_arg(card), response))) goto exit;
       } else {
-        printf("unsupported\n");
+        sdmmc_log("unsupported\n");
       }
     }
   }
 
   // This step isn't strictly necessary, but I guess we might want to equalize
   // the electrical characteristics of all data pins.
-  printf("disabling pull-up resistor on CD/DAT3 pin\n");
+  sdmmc_log("disabling pull-up resistor on CD/DAT3 pin\n");
   if ((err = sdmmc_command(SD_ACMD42_SET_CLR_CARD_DETECT, 0, response))) goto exit;
 
   u32 bus_width = SDIO_BUS_WIDE_1B;
@@ -551,7 +558,7 @@ u32 sdmmc_init_card(const struct SdmmcHostCapabilities* host_caps) {
   // bus, but a check beforehand won't hurt.
   if (host_caps->use_4bit_data_bus && card->scr.v1.supports_4bit_wide_bus) {
     bus_width = SDIO_BUS_WIDE_4B;
-    printf("switching data bus to 4-bit mode\n");
+    sdmmc_log("switching data bus to 4-bit mode\n");
     if ((err = sdmmc_command(SD_ACMD6_SET_BUS_WIDTH, 2, response))) goto exit;
   }
 
@@ -564,11 +571,11 @@ u32 sdmmc_init_card(const struct SdmmcHostCapabilities* host_caps) {
   // which have variable logical block sizes, with the default not necessarily
   // being 512 bytes. Newer cards simply ignore CMD16.
   const u32 block_len = SDMMC_BLOCK_SIZE;
-  printf("setting block length to %" PRIu32 "\n", block_len);
+  sdmmc_log("setting block length to %" PRIu32 "\n", block_len);
   if ((err = sdmmc_command(SDMMC_CMD16_SET_BLOCKLEN, block_len, response))) goto exit;
 
   Systime ident_time = systime_now() - ident_start_time;
-  printf(
+  sdmmc_log(
     "indentification sequence completed in %" PRIu32 " ms\n", (u32)systime_as_millis(ident_time)
   );
 
@@ -832,7 +839,7 @@ static u32 configure_sdio_bus(u32 freq, u32 bus_width, u32 power_saving) {
 
   char str[10];
   humanize_units(str, sizeof(str), sdio_ck);
-  printf("setting SDIO_CK to %sHz\n", str);
+  sdmmc_log("setting SDIO_CK to %sHz\n", str);
   WRITE_REG(SDIO->CLKCR, clkcr);
   return sdio_ck;
 }

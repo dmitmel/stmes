@@ -13,14 +13,29 @@
 #include <sys/lock.h>
 #include <unistd.h>
 
+#ifndef __clang__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-declarations"
+#endif
+
 // Define fallbacks for _init/_fini as weak symbols, so that linking doesn't
 // fail in case the crt*.o objects are missing.
-void _init(void);
-void _fini(void);
 __WEAK void _init(void) {}
 __WEAK void _fini(void) {}
 
-__USED void* _sbrk(ptrdiff_t incr) {
+// Replace exception personality routines with empty stubs to avoid linking the
+// unwinding internals from libgcc, which are pretty large.
+void __aeabi_unwind_cpp_pr0(void) {
+  __builtin_trap();
+}
+void __aeabi_unwind_cpp_pr1(void) {
+  __builtin_trap();
+}
+void __aeabi_unwind_cpp_pr2(void) {
+  __builtin_trap();
+}
+
+void* _sbrk(ptrdiff_t incr) {
   extern u32 __heap_start[], __heap_end[]; // These are defined by the linker script
   // Static initializers are allowed to reference addresses of other symbols
   static usize heap_ptr = (usize)__heap_start;
@@ -68,6 +83,15 @@ off_t _lseek(int fd, off_t offset, int whence) {
   errno = EBADF;
   return 0;
 }
+
+void _exit(int code) {
+  UNUSED(code);
+  __builtin_trap();
+}
+
+#ifndef __clang__
+#pragma GCC diagnostic pop
+#endif
 
 // Newlib has a facility for locking under a multi-threaded system, which
 // simply requires providing all locking-related subroutines to override the
