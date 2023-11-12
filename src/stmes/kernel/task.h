@@ -9,9 +9,8 @@ extern "C" {
 #endif
 
 enum Syscall {
-  SYSCALL_WAIT,
   SYSCALL_YIELD,
-  SYSCALL_DEFERRED_YIELD,
+  SYSCALL_WAIT,
   SYSCALL_SPAWN,
   SYSCALL_EXIT,
   SYSCALLS_COUNT,
@@ -19,28 +18,35 @@ enum Syscall {
 
 // The system call ABI is described in the implementation file.
 
-__STATIC_FORCEINLINE void syscall_0(enum Syscall nr) {
-  __ASM volatile("svc %0" ::"n"(nr) : "memory");
+__STATIC_FORCEINLINE usize syscall_0(enum Syscall nr) {
+  register usize ret __ASM("r0");
+  __ASM volatile("svc %1" : "=r"(ret) : "n"(nr) : "memory");
+  return ret;
 }
 
-__STATIC_FORCEINLINE void syscall_1(enum Syscall nr, usize a) {
-  register usize r4 __ASM("r4") = a;
-  __ASM volatile("svc %0" ::"n"(nr), "r"(r4) : "memory");
+__STATIC_FORCEINLINE usize syscall_1(enum Syscall nr, usize a) {
+  register usize ret __ASM("r0"), r0 __ASM("r0") = a;
+  __ASM volatile("svc %1" : "=r"(ret) : "n"(nr), "r"(r0) : "memory");
+  return ret;
 }
 
-__STATIC_FORCEINLINE void syscall_2(enum Syscall nr, usize a, usize b) {
-  register usize r4 __ASM("r4") = a, r5 __ASM("r5") = b;
-  __ASM volatile("svc %0" ::"n"(nr), "r"(r4), "r"(r5) : "memory");
+__STATIC_FORCEINLINE usize syscall_2(enum Syscall nr, usize a, usize b) {
+  register usize ret __ASM("r0"), r0 __ASM("r0") = a, r1 __ASM("r1") = b;
+  __ASM volatile("svc %1" : "=r"(ret) : "n"(nr), "r"(r0), "r"(r1) : "memory");
+  return ret;
 }
 
-__STATIC_FORCEINLINE void syscall_3(enum Syscall nr, usize a, usize b, usize c) {
-  register usize r4 __ASM("r4") = a, r5 __ASM("r5") = b, r6 __ASM("r6") = c;
-  __ASM volatile("svc %0" ::"n"(nr), "r"(r4), "r"(r5), "r"(r6) : "memory");
+__STATIC_FORCEINLINE usize syscall_3(enum Syscall nr, usize a, usize b, usize c) {
+  register usize ret __ASM("r0"), r0 __ASM("r0") = a, r1 __ASM("r1") = b, r2 __ASM("r2") = c;
+  __ASM volatile("svc %1" : "=r"(ret) : "n"(nr), "r"(r0), "r"(r1), "r"(r2) : "memory");
+  return ret;
 }
 
-__STATIC_FORCEINLINE void syscall_4(enum Syscall nr, usize a, usize b, usize c, usize d) {
-  register usize r4 __ASM("r4") = a, r5 __ASM("r5") = b, r6 __ASM("r6") = c, r7 __ASM("r7") = d;
-  __ASM volatile("svc %0" ::"n"(nr), "r"(r4), "r"(r5), "r"(r6), "r"(r7) : "memory");
+__STATIC_FORCEINLINE usize syscall_4(enum Syscall nr, usize a, usize b, usize c, usize d) {
+  register usize ret __ASM("r0");
+  register usize r0 __ASM("r0") = a, r1 __ASM("r1") = b, r2 __ASM("r2") = c, r3 __ASM("r3") = d;
+  __ASM volatile("svc %1" : "=r"(ret) : "n"(nr), "r"(r0), "r"(r1), "r"(r2), "r"(r3) : "memory");
+  return ret;
 }
 
 typedef u8 TaskId;
@@ -72,7 +78,6 @@ struct Task {
   TaskPriority priority;
   struct Task *next, *prev;
   Systime wait_deadline;
-  struct Notification* wait_notification;
   u8* stack_start;
   usize stack_size;
 };
@@ -86,10 +91,8 @@ __STATIC_INLINE struct Task* get_current_task(void) {
 }
 
 void start_task_scheduler(void);
-struct Task* task_scheduler(enum Syscall syscall_nr, struct Task* prev_task);
 void task_notify_init(struct Notification* self);
 TasksMask task_notify(struct Notification* notification);
-void task_wait(struct Notification* notification, Systime deadline);
 void task_sleep(u32 delay_ms);
 void task_sleep_until(Systime deadline);
 void task_join(struct Task* other_task); // TODO, requires its own syscall
@@ -113,9 +116,13 @@ __STATIC_INLINE void task_yield_from_isr(void) {
   SCB->ICSR = SCB_ICSR_PENDSVSET_Msk;
 }
 
-__STATIC_INLINE __NO_RETURN void task_exit(void) {
+__STATIC_FORCEINLINE __NO_RETURN void task_exit(void) {
   syscall_0(SYSCALL_EXIT);
   __builtin_unreachable();
+}
+
+__STATIC_FORCEINLINE void task_wait(struct Notification* notification, Systime deadline) {
+  syscall_3(SYSCALL_WAIT, (u32)deadline, (u32)(deadline >> 32), (usize)notification);
 }
 
 #ifdef __cplusplus

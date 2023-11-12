@@ -81,25 +81,13 @@ static struct TaskSchedulerState {
   Systime next_closest_deadline;
 } scheduler_state;
 
-// The scheduler will be unlocked only after it has been started.
+// The scheduler will be unlocked only after it has been started. The kernel
+// functions should then lock the scheduler state before using it.
 static volatile bool scheduler_state_lock = true;
-
-// The kernel functions should lock the scheduler state before using it.
-__STATIC_FORCEINLINE struct TaskSchedulerState* acquire_scheduler_state(void) {
-  bool was_locked = __atomic_test_and_set(&scheduler_state_lock, __ATOMIC_ACQUIRE);
-  ASSERT(!was_locked);
-  return &scheduler_state;
-}
-
-__STATIC_FORCEINLINE void release_scheduler_state(void) {
-  __atomic_clear(&scheduler_state_lock, __ATOMIC_RELEASE);
-}
 
 void start_task_scheduler(void) {
   struct TaskSchedulerState* state = &scheduler_state;
-  state->ready_queue_head = NULL;
-  state->sleeping_queue_head = NULL;
-  state->woken_up_tasks_mask = 0;
+  *state = (struct TaskSchedulerState){ 0 }; // Zero-initialize the whole struct
   state->next_closest_deadline = NO_DEADLINE;
 
   HAL_NVIC_SetPriority(SVCall_IRQn, 0xF, 0xF);
@@ -209,8 +197,10 @@ static void wake_up_tasks(TasksMask mask) {
 // address loads for its every field, so it's better to break the optimizer's
 // assumptions and pass this address from outside. A schizo-optimization, I
 // must admit.
-static void put_task_to_sleep(struct TaskSchedulerState* state, struct Task* task) {
-  struct Notification* notification = task->wait_notification;
+static void syscall_wait(
+  struct TaskSchedulerState* state, Systime deadline, struct Notification* notification
+) {
+  struct Task* task = current_task;
   if (notification != NULL) {
     // NOTE: The actual assignment of a task to a notification happens inside
     // the WAIT syscall function as a workaround for a subtle race condition.
@@ -236,7 +226,7 @@ static void put_task_to_sleep(struct TaskSchedulerState* state, struct Task* tas
   state->sleeping_queue_head = task_queue_insert(state->sleeping_queue_head, task);
   // Re-checking all timers isn't required here, we only need to decrease the
   // closest deadline if necessary.
-  Systime deadline = task->wait_deadline;
+  task->wait_deadline = deadline;
   if (deadline < state->next_closest_deadline) {
     state->next_closest_deadline = deadline;
     // TODO: hwtimer_set_alarm((u32)deadline);
@@ -245,19 +235,8 @@ static void put_task_to_sleep(struct TaskSchedulerState* state, struct Task* tas
 
 // NOTE: This function will be executed very frequently (at least on every VGA
 // scanline), performance is CRITICAL here!
-struct Task* task_scheduler(enum Syscall syscall_nr, struct Task* prev_task) {
-  struct TaskSchedulerState* state = acquire_scheduler_state();
-
-  // The WAIT syscall is BY FAR the most frequently invoked one (like, it
-  // accounts for 99% of all syscalls made in the system), so it is accelerated
-  // by being implemented directly inside the scheduler (along with the YIELD
-  // one, kinda, which essentially does nothing but cause a context switch) to
-  // bypass the normal syscall entry code and to avoid having to lock the
-  // scheduler state twice. This optimization certainly doesn't lead to the
-  // prettiest code, but that will suffice for now.
-  if (syscall_nr == SYSCALL_WAIT) {
-    put_task_to_sleep(state, prev_task);
-  }
+static struct Task* task_scheduler(void) {
+  struct TaskSchedulerState* state = &scheduler_state;
 
   struct Task* task;
   while (true) {
@@ -290,7 +269,6 @@ struct Task* task_scheduler(enum Syscall syscall_nr, struct Task* prev_task) {
     }
   }
 
-  release_scheduler_state();
   return task;
 }
 
@@ -302,17 +280,6 @@ TasksMask task_notify(struct Notification* notify) {
   TasksMask waiters = __atomic_exchange_n(&notify->waiters, 0, __ATOMIC_RELAXED);
   __atomic_fetch_or(&scheduler_state.woken_up_tasks_mask, waiters, __ATOMIC_RELAXED);
   return waiters;
-}
-
-void task_wait(struct Notification* notification, Systime deadline) {
-  struct Task* task = current_task;
-  // Even though there is no lock protecting these fields, and writes of 64-bit
-  // ints are not even atomic on ARMv7m, it doesn't matter since their values
-  // are considered valid only when the task has been put to sleep (basically,
-  // the execution status of the task itself acts as a lock here).
-  task->wait_deadline = deadline;
-  task->wait_notification = notification;
-  syscall_0(SYSCALL_WAIT);
 }
 
 void task_sleep(u32 delay_ms) {
@@ -334,7 +301,7 @@ void task_sleep_until(Systime deadline) {
 }
 
 static void syscall_spawn(struct Task* task) {
-  struct TaskSchedulerState* state = acquire_scheduler_state();
+  struct TaskSchedulerState* state = &scheduler_state;
 
   // This is O(n^2), but who cares, we won't be spawning lots of tasks anyway.
   for (TaskId free_id = 0; free_id < MAX_ALIVE_TASKS && free_id != DEAD_TASK_ID; free_id++) {
@@ -350,12 +317,10 @@ static void syscall_spawn(struct Task* task) {
   ASSERT(task->id != DEAD_TASK_ID);
 
   state->ready_queue_head = task_queue_insert(state->ready_queue_head, task);
-
-  release_scheduler_state();
 }
 
 static void syscall_exit(void) {
-  struct TaskSchedulerState* state = acquire_scheduler_state();
+  struct TaskSchedulerState* state = &scheduler_state;
 
   struct Task* task = current_task;
   state->ready_queue_head = task_queue_remove(state->ready_queue_head, task);
@@ -364,21 +329,31 @@ static void syscall_exit(void) {
   // this task anyway. TODO: Or not? Is inspecting the task's registers after
   // it has died useful in any way? Perhaps we should have a reaper task?
   current_task = NULL;
-
-  release_scheduler_state();
 }
 
-static void syscall_handler_entry(usize arg1, usize arg2, usize arg3, enum Syscall syscall_nr) {
-  UNUSED(arg2), UNUSED(arg3);
-  switch (syscall_nr) {
-    case SYSCALL_YIELD:
-    case SYSCALL_WAIT:
-      // These are implemented through the context switcher.
-      return;
-    case SYSCALL_SPAWN: syscall_spawn((struct Task*)arg1); return;
-    case SYSCALL_EXIT: syscall_exit(); return;
-    default: CRASH("Unknown syscall");
+static struct Task* kernel_entry(enum Syscall syscall_nr, usize args[4]) {
+  if (__atomic_test_and_set(&scheduler_state_lock, __ATOMIC_ACQUIRE)) {
+    CRASH("kernel state already locked");
   }
+  switch (syscall_nr) {
+    case SYSCALL_YIELD: {
+      // The context switcher will be entered immediately after return, so the
+      // yield syscall essentially "does nothing".
+      break;
+    }
+    case SYSCALL_WAIT: {
+      Systime deadline = ((u64)args[1] << 32) | (u64)args[0];
+      struct Notification* notification = (struct Notification*)args[2];
+      syscall_wait(&scheduler_state, deadline, notification);
+      break;
+    }
+    case SYSCALL_SPAWN: syscall_spawn((struct Task*)args[0]); break;
+    case SYSCALL_EXIT: syscall_exit(); break;
+    default: CRASH("unknown syscall");
+  }
+  struct Task* next_task = task_scheduler();
+  __atomic_clear(&scheduler_state_lock, __ATOMIC_RELEASE);
+  return next_task;
 }
 
 // This function is the bottom-most frame of every task stack and exists
@@ -416,18 +391,15 @@ void task_spawn(struct Task* task, const struct TaskParams* params) {
   ASSERT((usize)params->stack_start % 8 == 0);
   ASSERT((usize)params->stack_size % 8 == 0);
 
-  struct ExceptionStackedContext {
+  struct TaskStackedContext {
+    u32 control, r4, r5, r6, r7, r8, r9, r10, r11, exc_return;
     u32 r0, r1, r2, r3, r12, lr, pc, xpsr;
   };
 
-  struct TaskStackedContext {
-    u32 control, r4, r5, r6, r7, r8, r9, r10, r11, exc_return;
-  };
-
-  u32 min_stack_size = sizeof(struct TaskStackedContext) + sizeof(struct ExceptionStackedContext);
-#if __FPU_USED == 1
+  u32 min_stack_size = sizeof(struct TaskStackedContext);
+#if __FPU_USED
   // 32 floating-point registers plus the FPSCR and a word for alignment:
-  min_stack_size += sizeof(float) * 32 + sizeof(u32) * 2;
+  min_stack_size += sizeof(float) * 32 + sizeof(u32) + sizeof(u32);
 #endif
   ASSERT(params->stack_size >= min_stack_size);
 
@@ -436,46 +408,40 @@ void task_spawn(struct Task* task, const struct TaskParams* params) {
   task->priority = 0;
   task->prev = task->next = NULL;
   task->wait_deadline = NO_DEADLINE;
-  task->wait_notification = NULL;
   task->stack_start = params->stack_start;
   task->stack_size = params->stack_size;
 
   fast_memset_u32((u32*)task->stack_start, STACK_CHECK_VALUE, task->stack_size / sizeof(u32));
 
   // Manufacture an initial context needed for cranking the task.
-  {
-    task->stack_ptr -= sizeof(struct ExceptionStackedContext);
-    struct ExceptionStackedContext* ctx = (void*)task->stack_ptr;
-    // Pass the arguments for `task_launchpad` in r0 and r1.
-    ctx->r0 = (usize)params->user_data;
-    ctx->r1 = (usize)params->func;
-    // The other general-purpose registers are set to dummy values.
-    ctx->r2 = 2, ctx->r3 = 3, ctx->r12 = 12;
-    // Write garbage into LR so that returning causes an explosion.
-    ctx->lr = 0;
-    // Execution will start here:
-    ctx->pc = (usize)task_launchpad;
-    // The EPSR.T (Thumb State) bit needs to be set depending on the last bit
-    // of PC (which will always be 1 on Cortex-M CPUs since they only executed
-    // Thumb code), which matches the CPU reset behavior:
-    // <https://developer.arm.com/documentation/ddi0403/d/System-Level-Architecture/System-Level-Programmers--Model/ARMv7-M-exception-model/Reset-behavior>
-    ctx->xpsr = (ctx->pc & 1) << xPSR_T_Pos;
-  }
-  {
-    task->stack_ptr -= sizeof(struct TaskStackedContext);
-    struct TaskStackedContext* ctx = (void*)task->stack_ptr;
-    // The bits of the CONTROL registers are largely irrelevant and must be
-    // reset, only CONTROL.nPRIV matters.
-    ctx->control = (0 << CONTROL_nPRIV_Pos) | (0 << CONTROL_SPSEL_Pos) | (0 << CONTROL_FPCA_Pos);
-    // The other general-purpose registers are set to dummy values.
-    ctx->r4 = 4, ctx->r5 = 5, ctx->r6 = 6, ctx->r7 = 7;
-    ctx->r8 = 8, ctx->r9 = 9, ctx->r10 = 10, ctx->r11 = 11;
-    // The initial EXC_RETURN value is such that the return happens into Thread
-    // mode, using PSP as the stack and the floating-point context is inactive,
-    // i.e. no FPU instructions have been issued so far and no FP registers
-    // have been stacked.
-    ctx->exc_return = EXC_RETURN_THREAD_PSP;
-  }
+  task->stack_ptr -= sizeof(struct TaskStackedContext);
+  struct TaskStackedContext* ctx = (void*)task->stack_ptr;
+
+  // Pass the arguments for `task_launchpad` in r0 and r1.
+  ctx->r0 = (usize)params->user_data;
+  ctx->r1 = (usize)params->func;
+  // The other general-purpose registers are set to dummy values.
+  ctx->r2 = 2, ctx->r3 = 3, ctx->r12 = 12;
+  // Write garbage into LR so that returning causes an explosion.
+  ctx->lr = 0;
+  // Execution will start here:
+  ctx->pc = (usize)task_launchpad;
+  // The EPSR.T (Thumb State) bit needs to be set depending on the last bit of
+  // PC (which will always be 1 on Cortex-M CPUs since they only executed Thumb
+  // code), which matches the CPU reset behavior:
+  // <https://developer.arm.com/documentation/ddi0403/d/System-Level-Architecture/System-Level-Programmers--Model/ARMv7-M-exception-model/Reset-behavior>
+  ctx->xpsr = (ctx->pc & 1) << xPSR_T_Pos;
+  // The bits of the CONTROL registers are largely irrelevant and must be
+  // reset, only CONTROL.nPRIV matters.
+  ctx->control = (0 << CONTROL_nPRIV_Pos) | (0 << CONTROL_SPSEL_Pos) | (0 << CONTROL_FPCA_Pos);
+  // The other general-purpose registers are set to dummy values.
+  ctx->r4 = 4, ctx->r5 = 5, ctx->r6 = 6, ctx->r7 = 7;
+  ctx->r8 = 8, ctx->r9 = 9, ctx->r10 = 10, ctx->r11 = 11;
+  // The initial EXC_RETURN value is such that the return happens into Thread
+  // mode, using PSP as the stack and the floating-point context is inactive,
+  // i.e. no FPU instructions have been issued and no FP registers have been
+  // stacked.
+  ctx->exc_return = EXC_RETURN_THREAD_PSP;
 
   syscall_1(SYSCALL_SPAWN, (usize)task);
 }
@@ -488,13 +454,12 @@ usize task_stack_high_watermark(struct Task* task) {
   return (usize)end - (usize)ptr;
 }
 
-// The core of the context switcher. Takes the syscall number that has caused
-// the switch, calls the scheduler and performs a switch if necessary. Must be
-// invoked at the end of an exception handler, with the LR set to the
-// appropriate EXC_RETURN value and with no frames on the stack in between. Had
-// to be written in assembly to reduce the task switching overhead and because
-// we are directly dealing with the CPU registers here.
-static __NAKED void context_switch(__UNUSED enum Syscall syscall_nr) {
+// Takes the pointer to the next scheduled task and performs a context switch
+// if necessary. Must be invoked at the end of an interrupt handler, with the
+// LR set to the appropriate EXC_RETURN value, all callee-saved registers
+// (r4-r11) unchanged from their values in the task we are switching out of,
+// and with no frames on the stack in between.
+static __NAKED void context_switch(__UNUSED struct Task* next_task) {
   // A quick note before we start off: before entering the interrupt, the
   // hardware has already stacked a bunch of CPU registers, switched into
   // privileged mode and set the stack pointer to MSP (Main Stack Pointer),
@@ -504,85 +469,36 @@ static __NAKED void context_switch(__UNUSED enum Syscall syscall_nr) {
   // can be freely clobbered by us since the hardware will restore them.
   // <https://developer.arm.com/documentation/ddi0439/b/Programmers-Model/Exceptions/Exception-handling>
 
-  // TODO: Add the ARM stack unwinding instructions for this function
   __ASM volatile( //
-    // We need to back up the LR register (since we will need its EXC_RETURN
-    // value for returning from the exception) before calling the scheduler
-    // function, but to keep the stack aligned, another register has to be
-    // backed up as well (which will come in handy later).
-    "push {r4, lr}\n\t"
-#if CFI_DIRECTIVES
-    // The CFI directives make the assembler put a certain section into the
-    // binary that informs the debugger how to unwind the stack and recover
-    // local variables in caller frames. They don't generate any machine code
-    // and were added purely for the convenience of debugging. We need to mark
-    // the registers that have been pushed on the stack:
-    ".cfi_adjust_cfa_offset 8\n\t"
-    ".cfi_rel_offset r4, 0\n\t"
-    ".cfi_rel_offset lr, 4\n\t"
-#endif
-
-    // The next two instructions load the address of `current_task`. The
-    // instruction `ldr rX, =%0` (load from the constant pool) is not used
+    // The following two instructions load the address of `current_task`. The
+    // instruction `ldr r3, =%0` (load from the constant pool) is not used
     // because it takes 2-5 cycles (see ARM 100166 section 3.3.3 "Load/store
     // timings") at best, usually 5, and a MOVW+MOVT combination predictably
     // takes just 2 cycles.
-    "movw r1, #:lower16:%[current_task]\n\t"
-    "movt r1, #:upper16:%[current_task]\n\t"
-    // Load the pointer to the current task and put it into r4, which has been
-    // backed up, so we can now use it for our purposes. The pointer is kept in
-    // a callee-saved register because we will need it later after invoking the
-    // scheduler.
-    "ldr r4, [r1]\n\t"
-
-    // The `scheduler` function may now be called. The task pointer needs to be
-    // moved into r1, the second argument register, the syscall number is
-    // already in the first argument register r0. The pointer to the next task
-    // will be returned into r0; r4 will effectively contain the pointer to the
-    // previous task.
-    "mov r1, r4\n\t"
-    "bl %[task_scheduler]\n\t"
-
-    // Now that the next task has been determined, prepare to actually switch
-    // the tasks. We first want to pop the registers which were pushed above.
-    // The value preserved in r4 needs to be moved to another register first,
-    // otherwise it will be lost:
-    "mov r1, r4\n\t"
-    "pop {r4, lr}\n\t"
-#if CFI_DIRECTIVES
-    // Here come the CFI directives once again, this time to inform the
-    // debugger that the values of the backed up registers are the same that
-    // they were at the beginning of the function.
-    ".cfi_adjust_cfa_offset -8\n\t"
-    ".cfi_restore r4\n\t"
-    ".cfi_restore lr\n\t"
-#endif
-    // At this point: r0 - next task, r1 - prev task, r2 - task stack pointer.
-
+    "movw r3, #:lower16:%[current_task]\n\t"
+    "movt r3, #:upper16:%[current_task]\n\t"
+    // Load the pointer to the previous task and put it into r1. The next task
+    // is already in the first argument register, r0.
+    "ldr r1, [r3]\n\t"
     // We can take a shortcut if the next task and the previous one are the
     // same, skipping over the context switch:
     "cmp r0, r1\n\t"
     "beq 2f\n\t"
-
-    // Load the address of the `current_task` variable once again.
-    "movw r3, #:lower16:%[current_task]\n\t"
-    "movt r3, #:upper16:%[current_task]\n\t"
     // Store the next task pointer in `current_task`.
     "str r0, [r3]\n\t"
 
     // NOTE: Here is where the actual context switching begins. It is
-    // implemented with some assistance from hardware: after all, since the CPU
-    // saves a part of context by pushing it on the stack upon exception entry,
+    // implemented with some assistance from hardware: after all, since a part
+    // of context has already been pushed it on the stack upon exception entry,
     // the stack pointer may simply be edited to point to a different block of
     // saved context, which may, for instance, reside on the stack of another
     // task. Hence, returning from this handler will jump into an entirely
-    // different task! The problem is, the hardware stacks only half the
-    // normal and FPU registers, and we must stack the rest ourselves.
+    // different task! The problem is, the hardware stacks only half the normal
+    // and FPU registers, and we must stack the rest ourselves.
+
+    // r0 - next_task, r1 - prev_task, r2 - task_stack_ptr.
 
     // Saving the state must be skipped if the previous task was NULL.
-    // TODO: This will happen very rarely: once (over the entire run time of
-    // the system) when entering the very first task, and also when exiting
-    // tasks, can this check be avoided?
     "cbz r1, 1f\n\t"
     // Alright, all preparations and pre-flight checks have been completed.
     // Load the current PSP (Process Stack Pointer) - it is used while the CPU
@@ -593,7 +509,8 @@ static __NAKED void context_switch(__UNUSED enum Syscall syscall_nr) {
     // is CONTROL.nPRIV, which determines whether the CPU is in the privileged
     // execution mode or not. The bits CONTROL.SPSEL (MSP is always used in the
     // Handler mode, and we always use PSP for tasks anyway) and CONTROL.FPCA
-    // are reset upon entering the interrupt.
+    // are reset upon entering the interrupt, and are restored from the bits of
+    // EXC_RETURN on exit.
     "mrs r3, control\n\t"
 #if __FPU_USED
     // The bit 4 of EXC_RETURN determines whether the stacked state includes
@@ -607,7 +524,7 @@ static __NAKED void context_switch(__UNUSED enum Syscall syscall_nr) {
     // the top of the stack. Note that if lazy FP state preservation is enabled
     // (which it always is, I guess), issuing this instruction will also
     // implicitly cause the registers s0-s15 to be stored as well in the space
-    // allocated in the stack frame for the exception. This is 32 memory
+    // allocated in the stack frame for the exception - that's 32 memory
     // transactions caused by a single instruction!
     "vstmdbeq r2!, {s16-s31}\n\t"
 #endif
@@ -644,28 +561,78 @@ static __NAKED void context_switch(__UNUSED enum Syscall syscall_nr) {
     "bx lr\n\t" :: //
 
       [current_task] "i"(&current_task),
-    [task_scheduler] "i"(&task_scheduler),
     [task_stack_ptr] "J"(offsetof(struct Task, stack_ptr))
   );
 }
 
-__NAKED void PendSV_Handler(void) {
-  // The PendSV handler effectively emulates the DEFERRED_YIELD syscall.
+// The common code for entering the kernel from the PendSV and SVCall
+// exceptions, and making a context switch afterwards. Must be tail-called from
+// the ISR functions.
+static __NAKED void
+handle_kernel_irq(__UNUSED enum Syscall syscall_nr, __UNUSED usize syscall_args[4]) {
   __ASM volatile( //
-    "movs r0, %0\n\t"
-    "b %1" :: //
-    "n"(SYSCALL_DEFERRED_YIELD),
-    "i"(&context_switch)
+    // We need to back up the LR register (since we will need its EXC_RETURN
+    // value for returning from the exception) before calling the kernel_entry
+    // function, plus another register to keep the stack aligned.
+    "push {r4, lr}\n\t"
+#if CFI_DIRECTIVES
+    // The CFI directives make the assembler put a certain section into the
+    // binary that informs the debugger on how to unwind the stack and recover
+    // local variables in the caller frames. They don't generate any machine
+    // code and were added purely for the convenience of debugging. We use them
+    // to mark the registers that have been pushed on the stack:
+    ".cfi_adjust_cfa_offset 8\n\t"
+    ".cfi_rel_offset r4, 0\n\t"
+    ".cfi_rel_offset lr, 4\n\t"
+#endif
+#if ARM_UNWIND_DIRECTIVES && !defined(__clang__)
+    // The ARM unwinding directives serve a similar purpose to the CFI ones,
+    // but are used for throwing C++ exceptions and generating backtraces at
+    // runtime.
+    ".save {r4, lr}\n\t"
+#endif
+    // The `kernel_entry` may now be called. The arguments are already in place
+    // in the appropriate registers since this function has the same signature.
+    // The kernel will call the scheduler and return the next task in r0.
+    "bl %[kernel_entry]\n\t"
+    // Pop the registers which were pushed above.
+    "pop {r4, lr}\n\t"
+#if CFI_DIRECTIVES
+    // Here come the CFI directives once again, this time to inform the
+    // debugger that the values of the backed up registers have been restored
+    // and are now the same that they were at the beginning of the function.
+    ".cfi_adjust_cfa_offset -8\n\t"
+    ".cfi_restore r4\n\t"
+    ".cfi_restore lr\n\t"
+#endif
+    // Tail-call the context switcher to actually switch the tasks. It is
+    // separated into its own function because of the unwinding directives: the
+    // ARM specific ones (i.e. `.save`) applies to the entire function and
+    // cannot be restricted to limited sections of code.
+    "b %[context_switch]" :: //
+      [kernel_entry] "i"(&kernel_entry),
+    [context_switch] "i"(&context_switch)
+  );
+}
+
+__NAKED void PendSV_Handler(void) {
+  // The PendSV handler effectively just emulates the YIELD syscall.
+  __ASM volatile(     //
+    "movs r0, %0\n\t" // syscall_nr
+    "movs r1, #0\n\t" // syscall_args
+    "b %1" ::         //
+    "n"(SYSCALL_YIELD),
+    "i"(&handle_kernel_irq)
   );
 }
 
 __NAKED void SVC_Handler(void) {
-  // NOTE: On the syscall ABI: the low callee-saved registers r4-r7 are used
-  // for the syscall parameters, and the syscall number is embedded into the
-  // immediate parameter of the `SVC` instruction. The main reason driving the
-  // choice of the registers is that the caller-saved registers (such as r0-r3)
-  // can't be used due to how interrupts on Cortex-M interact with the calling
-  // convention.
+  // NOTE: On the syscall ABI: the low caller-saved registers r0-r3 are used
+  // for the syscall parameters, r0 is used for the return value and the
+  // syscall number is embedded into the immediate parameter of the `SVC`
+  // instruction. There is, however, an important consideration relating to the
+  // choice of caller-saved registers due to how interrupts on Cortex-M
+  // interact with the ARM calling convention.
   //
   // Suppose an SVC instruction is issued by the application, and during the
   // stacking process a higher-priority (in other words: any) interrupt
@@ -674,75 +641,36 @@ __NAKED void SVC_Handler(void) {
   // safe as long as everyone respects the calling convention. However, ISRs
   // are free to contaminate the caller-saved registers (r0-r3 and r12) since
   // all of them are on the stack and will be restored by the hardware.
-  // However, for us this means that if we were to use r0-r3 for syscall
-  // parameters, an early-arriving interrupt could clobber them all. Of course,
-  // we could just load the values of r0-r3 from the stack, but that is
-  // additional work. In contrast, since the software is responsible for
+  // However, for us this means that if we want to use r0-r3 for passing
+  // syscall parameters, an early-arriving interrupt could clobber them all.
+  // The solution to that, of course, is simply loading their values from the
+  // stack in the ISR. In contrast, since the software is responsible for
   // restoring r4-r11 at the end of every function, even if this exception gets
   // tail-chained, the register values will be those at the point of the `SVC`
   // instruction.
-
-  // TODO: Add the ARM stack unwinding instructions for this function
+  //
+  // However, the choice of r0-r3 has its upside: because these registers
+  // reside on the stack, we can just get a pointer to the start of the
+  // interrupt frame and pass it around like an array, whose first 4 elements
+  // will be: r0, r1, r2 and r3! If any syscall then needs to check any
+  // parameters or write a return value, it can simply use this array - this
+  // greatly simplifies their implementations in C and the necessary
+  // supplementary assembly code.
   __ASM volatile( //
     // The bit 2 of LR specifies which stack was in use prior to entering the
     // interrupt. Use it to figure out whether the caller was using MSP or PSP.
     "tst lr, #4\n\t"
     "ite eq\n\t"
-    "mrseq r0, msp\n\t" // if (LR & 4) == 0
-    "mrsne r0, psp\n\t" // if (LR & 4) != 0
+    "mrseq r1, msp\n\t" // if (LR & 4) == 0
+    "mrsne r1, psp\n\t" // if (LR & 4) != 0
     // Load the PC from the stacked context.
-    "ldr r0, [r0, #24]\n\t"
+    "ldr r0, [r1, #24]\n\t"
     // Load a halfword from memory with the instruction's immediate, which is
-    // the syscall number. Put it into the first argument register, for the
-    // purposes of the shortcuts below.
+    // the syscall number. Put it into r0 - the first argument register.
     "ldrb r0, [r0, #-2]\n\t"
-
-    // A shortcut for the WAIT syscall, which is invoked really frequently.
-    "cmp r0, %[SYSCALL_WAIT]\n\t"
-    // Jump to the context switcher immediately if the syscall number matches.
-    "beq %[context_switch]\n\t"
-    // It is also worthwhile to have a shortcut for the YIELD syscall, which is
-    // also invoked very often.
-    "cmp r0, %[SYSCALL_YIELD]\n\t"
-    "beq %[context_switch]\n\t"
-
-    // The normal syscall entry path. Save the LR and the syscall number before
-    // calling the handler.
-    "push {r0, lr}\n\t"
-#if CFI_DIRECTIVES
-    ".cfi_adjust_cfa_offset 8\n\t"
-    ".cfi_rel_offset r0, 0\n\t"
-    ".cfi_rel_offset lr, 4\n\t"
-#endif
-
-    // TODO: Support the 4th argument in r7. This requires writing out the
-    // assembly for putting the 5th argument of a function on the stack, plus
-    // the corresponding CFI directives.
-
-    // First, translate the argument registers from the syscall ABI into the
-    // normal C calling convention.
-    "mov r3, r0\n\t"
-    "mov r0, r4\n\t"
-    "mov r1, r5\n\t"
-    "mov r2, r6\n\t"
-    // And jump into the generic syscall handler.
-    "bl %[syscall_handler_entry]\n\t"
-
-    // Restore the LR and the syscall number, loading it into the first
-    // argument register.
-    "pop {r0, lr}\n\t"
-#if CFI_DIRECTIVES
-    ".cfi_adjust_cfa_offset -8\n\t"
-    ".cfi_restore r0\n\t"
-    ".cfi_restore lr\n\t"
-#endif
-
-    // Afterwards, jump into the context switcher.
-    "b %[context_switch]" :: //
-
-      [context_switch] "i"(&context_switch),
-    [SYSCALL_YIELD] "n"(SYSCALL_YIELD),
-    [SYSCALL_WAIT] "n"(SYSCALL_WAIT),
-    [syscall_handler_entry] "i"(&syscall_handler_entry)
+    // Enter the kernel code. The argument values for the syscall number and
+    // the pointer to the stacked registers are in r0 and r1 respectively.
+    "b %0" :: //
+    "i"(&handle_kernel_irq)
   );
 }
