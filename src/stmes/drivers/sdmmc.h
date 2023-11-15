@@ -166,7 +166,7 @@ union SdmmcCID {
   u32 words[4];
   struct __packed SdCID {
     u32 : 1;
-    u32 crc7_checksum : 7;
+    u32 crc7 : 7;
     u32 manufacturing_month : 4;
     u32 manufacturing_year : 8;
     u32 : 4;
@@ -538,6 +538,8 @@ __NO_RETURN void crash_on_sd_error(u32 code, const char* file, u32 line);
       crash_on_sd_error(__code__, __FILE__, __LINE__); \
     }                                                  \
   } while (0)
+
+u8 sdmmc_crc7(usize len, const u32 data[]);
 
 #ifdef __cplusplus
 }

@@ -44,8 +44,6 @@
 // 2. Store block addresses and numbers in u64.
 // 3. Send the high bits of the block address with CMD22 before reads/writes.
 
-// TODO: Verify checksum of CID and CSD.
-
 // TODO: Add interrupts for card insertion/removal, support hot-plugging.
 
 #include "stmes/drivers/sdmmc.h"
@@ -1010,6 +1008,9 @@ static u32 sdmmc_command(enum SdmmcCommand cmd, u32 arg, u32 response[4]) {
     response[1] = READ_REG(SDIO->RESP2);
     response[2] = READ_REG(SDIO->RESP3);
     response[3] = READ_REG(SDIO->RESP4);
+    // NOTE: The CRC field of CSD and CID is visible through the response data
+    // registers, but that doesn't mean that it is not automatically validated
+    // by the peripheral.
   }
   u32 resp_fmt = (cmd & SDMMC_RESPONSE_FORMAT_Msk) >> SDMMC_RESPONSE_FORMAT_Pos;
 
@@ -1230,4 +1231,20 @@ __NO_RETURN void crash_on_sd_error(u32 code, const char* file, u32 line) {
   }
 
   crash(msg, file, line);
+}
+
+u8 sdmmc_crc7(usize len, const u32 data[]) {
+  u8 crc = 0;
+  for (usize i = 0; i < len; i++) {
+    u8 byte = data[i / 4] >> (24 - (i % 4) * 8);
+    // <https://stackoverflow.com/a/49676373>
+    // <https://community.st.com/t5/stm32-mcus-security/is-crc-7-x7-x3-x0-supported-by-stm32l4r9/m-p/66791>
+    const u8 polynomial = BIT(7) | BIT(3) | BIT(0); // x^7 + x^3 + 1
+    crc ^= byte;
+    for (u32 i = 0; i < 8; i++) {
+      if (crc & BIT(7)) crc ^= polynomial;
+      crc <<= 1;
+    }
+  }
+  return crc >> 1;
 }
