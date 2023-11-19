@@ -65,7 +65,6 @@
 // internals of the ARM architecture:
 // <https://stackoverflow.com/questions/24091566/why-does-the-arm-pc-register-point-to-the-instruction-after-the-next-one-to-be-e>
 
-// TODO: Unwinding through interrupt frames
 // TODO: Stack pointer range checks
 
 #include "stmes/kernel/unwind.h"
@@ -225,7 +224,7 @@ unwind_pop_registers(struct UnwindReader* reader, struct UnwindContext* ctx, u32
     return UNWIND_RESERVED_SPARE_INSTRUCTION;
   }
   unwind_log("pop {");
-  const u32* sp = (const u32*)ctx->registers[REG_SP];
+  const usize* sp = (const usize*)ctx->registers[REG_SP];
   // Find the first and the last set bits in the mask to reduce the number of
   // useless iterations in the loop below. Typically, a contiguous range of
   // core registers will be popped.
@@ -409,6 +408,20 @@ enum UnwindError unwind_frame(struct UnwindContext* ctx, struct UnwindFrame* fra
 
   *frame = (struct UnwindFrame){ 0 };
 
+  // Loading an address of the form 0xFXXXXXXX into PC signifies the return
+  // from an interrupt handler - this is documented in the section B1.5.8
+  // "Exception return behavior" and the pseudocode function `BXWritePC` in the
+  // section A2.3.1 "Arm core registers" of DDI0403E. For such addresses a
+  // special-case path needs to be taken to emulate the exception unstacking
+  // behavior of the CPU, and they are located in the "System address space" in
+  // the range 0xE0000000-0xFFFFFFFF, from where code can't be executed anyway.
+  if (EXTRACT_BITS(ctx->registers[REG_PC], 28, 4) == 0xF) {
+    usize exc_return = ctx->registers[REG_PC];
+    frame->instruction_addr = (void*)exc_return;
+    frame->stack_ptr = unwind_interrupt_frame(ctx, exc_return);
+    return UNWIND_OK;
+  }
+
   // Clear the Thumb state bit of the address in PC
   usize pc = clear_bit(ctx->registers[REG_PC], BIT(0));
   frame->instruction_addr = (void*)pc;
@@ -441,25 +454,83 @@ enum UnwindError unwind_frame(struct UnwindContext* ctx, struct UnwindFrame* fra
   while (reader.pos < reader.len) {
     if ((err = unwind_exec_instruction(&reader, ctx))) return err;
   }
+  u32 modified_regs = reader.modified_registers;
+
+  // `mov pc, lr` if the PC hasn't already been touched.
+  if (!test_bit(modified_regs, BIT(REG_PC)) && ctx->registers[REG_PC] != ctx->registers[REG_LR]) {
+    ctx->registers[REG_PC] = ctx->registers[REG_LR];
+    // Be sure to mark the change! Simple functions which don't push anything
+    // onto the stack won't necessitate generation of any unwinding
+    // information, so it will appear as if no registers have been affected.
+    modified_regs |= BIT(REG_PC);
+  }
 
   // Prevent infinite loops if none of the important registers were changed.
-  if (!test_any_bit(reader.modified_registers, BIT(REG_SP) | BIT(REG_LR) | BIT(REG_PC))) {
+  if (!test_any_bit(modified_regs, BIT(REG_SP) | BIT(REG_LR) | BIT(REG_PC))) {
     return UNWIND_REFUSED;
   }
 
-  // `mov pc, lr` if the PC hasn't already been touched.
-  if (!test_bit(reader.modified_registers, BIT(REG_PC))) {
-    ctx->registers[REG_PC] = ctx->registers[REG_LR];
+  // Copy the stack pointer to the currently active stack register.
+  if (test_bit(ctx->registers[REG_CONTROL], CONTROL_SPSEL_Msk)) {
+    ctx->registers[REG_PSP] = ctx->registers[REG_SP];
+  } else {
+    ctx->registers[REG_MSP] = ctx->registers[REG_SP];
   }
 
   return err;
+}
+
+// Emulates the unstacking process described in sections B1.5.7 "Stack
+// alignment on exception entry" B1.5.8 "Exception return behavior" of
+// DDI0403E, specifically the behavior of the pseudocode functions
+// `ExceptionReturn` and `PopStack`. Must be called with an initialized
+// UnwindContext, in particular the registers PSP, MSP and CONTROL in the
+// context must be set to reasonable values. See also:
+// <https://developer.arm.com/documentation/ddi0403/d/System-Level-Architecture/System-Level-Programmers--Model/ARMv7-M-exception-model/Exception-return-behavior>
+void* unwind_interrupt_frame(struct UnwindContext* ctx, usize exc_return) {
+  // Use bit 2 of the EXC_RETURN to determine which stack was in use prior to
+  // entering the interrupt handler, which, consequently, contains the frame
+  // with the stacked registers.
+  usize active_sp = test_bit(exc_return, BIT(2)) ? REG_PSP : REG_MSP;
+  usize frame_start = ctx->registers[active_sp];
+
+  const usize* sp = (const usize*)frame_start;
+  static const u8 stacked_registers[] = { 0, 1, 2, 3, 12, REG_LR, REG_PC, REG_XPSR };
+  for (usize i = 0; i < SIZEOF(stacked_registers); i++) {
+    ctx->registers[stacked_registers[i]] = *sp++;
+  }
+
+  // Bit 4 of EXC_RETURN determines whether this is a basic frame or an
+  // extended one, containing FPU regigsters.
+  if (!test_bit(exc_return, BIT(4))) {
+    sp += 18; // Skip the words of stacked s0-s15, FPSCR and a word for alignment.
+  }
+
+  // Bit 9 of the *stacked* xPSR may be used to check if the stack had to be
+  // realigned before interrupt entry. During normal operation, it is reserved.
+  if (test_bit(ctx->registers[REG_XPSR], BIT(9))) {
+    // A word was inserted to realign a previously 4-byte aligned Thread stack
+    // to 8 bytes before entering the interrupt handler.
+    sp += 1;
+  }
+
+  ctx->registers[active_sp] = ctx->registers[REG_SP] = (usize)sp;
+
+  // Restore the fields of the CONTROL registers based on the bits of EXC_RETURN.
+  usize control = ctx->registers[REG_CONTROL];
+  MODIFY_REG(control, CONTROL_SPSEL_Msk, test_bit(exc_return, BIT(2)) << CONTROL_SPSEL_Pos);
+  MODIFY_REG(control, CONTROL_FPCA_Msk, test_bit(exc_return, BIT(4)) << CONTROL_FPCA_Pos);
+  ctx->registers[REG_CONTROL] = control;
+
+  return (void*)frame_start;
 }
 
 // Records the register values AT THE CALL SITE into the given context struct,
 // so that unwinding starts directly at the caller function. Unfortunately, due
 // to the fact that the pointer to the context is passed in r0, the first
 // argument register, its original value will be lost, but honestly, who cares?
-__NOINLINE __NAKED void unwind_capture_context(__UNUSED struct UnwindContext* ctx) {
+__NOINLINE __NAKED const struct UnwindContext*
+unwind_capture_context(__UNUSED struct UnwindContext* ctx) {
   __ASM volatile( //
     // r13 and r15 (SP and PC respectively) can't be present in the register
     // list of the `STM` instruction (the encoding doesn't allow it), so save
@@ -471,46 +542,59 @@ __NOINLINE __NAKED void unwind_capture_context(__UNUSED struct UnwindContext* ct
     // the values of PC and SP. The calling convention didn't require changing
     // the SP here in any way, and the LR points to the next instruction in the
     // calling function, so as far as I can tell this is completely legal.
-    "str sp, [r0, #(4 * 13)]\n\t" // REG_SP
-    "str lr, [r0, #(4 * 14)]\n\t" // REG_LR
-    "str lr, [r0, #(4 * 15)]\n\t" // REG_PC
+    "str sp, [r0, %0]\n\t"
+    "str lr, [r0, %1]\n\t"
+    "str lr, [r0, %2]\n\t"
+    // Lastly, store all the special registers. Note that the preceding
+    // instructions need to be chosen so as to not affect any of the status
+    // flags in the xPSR and such.
+    "mrs r1, xpsr\n\t"
+    "str r1, [r0, %3]\n\t"
+    "mrs r1, msp\n\t"
+    "str r1, [r0, %4]\n\t"
+    "mrs r1, psp\n\t"
+    "str r1, [r0, %5]\n\t"
+    "mrs r1, control\n\t"
+    "str r1, [r0, %6]\n\t"
     // Aaand return.
-    "bx lr"
+    "bx lr" :: //
+    // The "J" constraint is for memory offsets in the LDR/STR instructions.
+    "J"(REG_SP * 4),
+    "J"(REG_LR * 4),
+    "J"(REG_PC * 4),
+    "J"(REG_XPSR * 4),
+    "J"(REG_MSP * 4),
+    "J"(REG_PSP * 4),
+    "J"(REG_CONTROL * 4)
   );
 }
 
-// A prototype of recording the context of another running task to be able to
-// get its backtrace.
+// Records the context of another running task to be able to get its backtrace.
 void unwind_capture_task_context(struct UnwindContext* ctx, const struct Task* task) {
-  struct ExceptionStackedContext {
-    u32 r0, r1, r2, r3, r12, lr, pc, xpsr;
-  };
-
-  struct TaskStackedContext {
-    u32 control, r4, r5, r6, r7, r8, r9, r10, r11, exc_return;
-  };
-
   // We can't trace ourselves like that - the stack must contain a valid
   // context switching frame.
   ASSERT(task != get_current_task());
-  const u8* stack_ptr = task->stack_ptr;
-
-  const struct TaskStackedContext* task_ctx = (void*)stack_ptr;
-  stack_ptr += sizeof(*task_ctx);
-  ASSERT((task_ctx->exc_return & BIT(4)) != 0); // TODO
+  const usize* sp = (const usize*)task->stack_ptr;
+  // Read the core registers in the task context saved by the kernel first.
+  ctx->registers[REG_CONTROL] = *sp++;
   for (usize reg = 4; reg <= 11; reg++) {
-    ctx->registers[reg] = (&task_ctx->r4)[reg - 4];
+    ctx->registers[reg] = *sp++;
   }
-
-  const struct ExceptionStackedContext* exc_ctx = (void*)stack_ptr;
-  stack_ptr += sizeof(*exc_ctx);
-  for (usize reg = 0; reg <= 3; reg++) {
-    ctx->registers[reg] = (&exc_ctx->r0)[reg];
+  // Read EXC_RETURN to figure out the format of the rest of the context frame.
+  usize exc_return = *sp++;
+  if (!test_bit(exc_return, BIT(4))) {
+    sp += 16; // Skip the saved FPU registers s16-s31 if the context frame includes them.
   }
-  ctx->registers[12] = exc_ctx->r12;
-  ctx->registers[REG_LR] = exc_ctx->lr;
-  ctx->registers[REG_PC] = exc_ctx->pc;
-  ctx->registers[REG_SP] = (usize)stack_ptr;
+  // Lastly, write the stack pointers for popping the CPU interrupt frame.
+  ctx->registers[REG_SP] = (usize)sp;
+  ctx->registers[REG_PSP] = (usize)sp;
+  // Unwinding from a task context should never require reading from the MSP,
+  // so leave it at NULL, so that doing so immediately causes a fault.
+  ctx->registers[REG_MSP] = 0;
+  // Finally, Recover the remaining registers by unwinding the context switch
+  // interrupt frame. This will fully complete the initialization of the
+  // unwinder context.
+  unwind_interrupt_frame(ctx, exc_return);
 }
 
 enum UnwindError backtrace(struct UnwindContext* ctx) {
@@ -518,14 +602,17 @@ enum UnwindError backtrace(struct UnwindContext* ctx) {
   for (u32 i = 0; true; i++) {
     enum UnwindError err = unwind_frame(ctx, &frame);
     if (err != UNWIND_OK && err != UNWIND_REFUSED) break;
-    printf(
-      "%2" PRIu32 ": %p %.*s+0x%0" PRIXPTR "\n",
-      i + 1,
-      frame.instruction_addr,
-      frame.function_name_len,
-      frame.function_name != NULL ? frame.function_name : "<unknown>",
-      (usize)frame.instruction_addr - (usize)frame.function_addr
-    );
+    printf("%2" PRIu32 ": %p sp=%p", i + 1, frame.instruction_addr, frame.stack_ptr);
+    if (unwind_is_interrupt_frame(&frame)) {
+      printf(" <interrupt>\n");
+    } else {
+      if (frame.function_name != NULL) {
+        printf(" %.*s", frame.function_name_len, frame.function_name);
+      } else {
+        printf(" <unknown>");
+      }
+      printf("+0x%0" PRIXPTR "\n", (usize)frame.instruction_addr - (usize)frame.function_addr);
+    }
     if (err == UNWIND_REFUSED) break;
   }
   return UNWIND_OK;

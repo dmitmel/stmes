@@ -14,6 +14,10 @@ enum {
   REG_SP = 13,
   REG_LR = 14,
   REG_PC = 15,
+  REG_XPSR = 16,
+  REG_MSP = 17,
+  REG_PSP = 18,
+  REG_CONTROL = 19,
 };
 
 enum UnwindError {
@@ -26,7 +30,7 @@ enum UnwindError {
 };
 
 struct UnwindContext {
-  usize registers[16];
+  usize registers[20];
 };
 
 struct UnwindFrame {
@@ -37,9 +41,14 @@ struct UnwindFrame {
   usize function_name_len;
 };
 
-void unwind_capture_context(struct UnwindContext* ctx);
-void unwind_capture_task_context(struct UnwindContext* ctx, const struct Task* task);
+__STATIC_FORCEINLINE bool unwind_is_interrupt_frame(const struct UnwindFrame* frame) {
+  // The reasoning for using this condition is given in the implementation file
+  return EXTRACT_BITS((usize)frame->instruction_addr, 28, 4) == 0xF;
+}
 
+const struct UnwindContext* unwind_capture_context(struct UnwindContext* ctx);
+void unwind_capture_task_context(struct UnwindContext* ctx, const struct Task* task);
+void* unwind_interrupt_frame(struct UnwindContext* ctx, usize exc_return);
 enum UnwindError unwind_frame(struct UnwindContext* ctx, struct UnwindFrame* frame);
 enum UnwindError backtrace(struct UnwindContext* ctx);
 
