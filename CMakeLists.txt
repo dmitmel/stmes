@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.17)
 
 if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
   set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/arm_gcc_toolchain.cmake")
@@ -21,6 +21,7 @@ option(FETCHCONTENT_QUIET "" OFF)  # Output download progress and other logs
 option(FETCHCONTENT_UPDATES_DISCONNECTED "" ON)  # Don't check for updates every time
 
 include(FetchContent)
+include(ExternalProject)
 
 set(DEPENDENCIES_DIR "" CACHE FILEPATH "The directory in which the dependencies will be downloaded and unpacked")
 if(DEPENDENCIES_DIR STREQUAL "")
@@ -72,6 +73,16 @@ FetchContent_Declare(stm32_mw_usb_host
   DOWNLOAD_DIR "${DEPENDENCIES_DIR}"
   SOURCE_DIR "${DEPENDENCIES_DIR}/stm32_mw_usb_host"
   DOWNLOAD_NAME "stm32_mw_usb_host_v3.3.4.tar.gz"
+)
+
+# TODO comments
+ExternalProject_Add(tools
+  PREFIX "${CMAKE_BINARY_DIR}/_deps/tools-prefix"
+  BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/tools"
+  SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tools"
+  DOWNLOAD_COMMAND ""
+  INSTALL_COMMAND ""  # An empty string suppresses this step since at least CMake 3.10
+  BUILD_ALWAYS YES    # TODO
 )
 
 get_property(project_languages GLOBAL PROPERTY ENABLED_LANGUAGES)
@@ -294,6 +305,11 @@ endforeach()
 set(linker_map_file $<TARGET_FILE:firmware>.map)
 target_link_options(firmware PRIVATE LINKER:--cref,-Map=${linker_map_file})
 set_property(TARGET firmware APPEND PROPERTY ADDITIONAL_CLEAN_FILES "${linker_map_file}")
+
+add_dependencies(firmware tools)
+set(linker_plugin_file "${CMAKE_CURRENT_BINARY_DIR}/tools/libtest_linker_plugin.so")
+target_link_options(firmware PRIVATE LINKER:-plugin,${linker_plugin_file})
+set_property(TARGET firmware APPEND PROPERTY LINK_DEPENDS "${linker_plugin_file}")
 
 include(CheckCCompilerFlag)
 # A replacement for the CheckLinkerFlag module, added in CMake v3.18, which

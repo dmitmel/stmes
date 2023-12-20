@@ -1,5 +1,5 @@
 .pio/
-.cache/clangd/
+**/.cache/clangd/
 local.mk
 .ccls
 compile_commands.json

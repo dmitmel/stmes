@@ -95,14 +95,14 @@ cmake freshcmake $(BUILD_DIR_STAMP):
 # This rule simply checks that the build system has been generated.
 ensurecmake: $(BUILD_DIR_STAMP)
 
-.PHONY: all firmware upload clean
+.PHONY: all firmware tools upload clean
 # The targets from the actual build system that will be exposed to the user.
 # $(BUILD_DIR_STAMP) is an order-only dependency here: Make will ensure that it
 # is made the first time, but won't care about file modification times later.
 # Afterwards, it is CMake's responsibility to regenerate the files when it
 # detects a change in any `CMakeLists.txt`. The plus sign before the command
 # tells Make to execute it even in the dry-run mode.
-all firmware upload clean: | $(BUILD_DIR_STAMP)
+all firmware tools upload clean: | $(BUILD_DIR_STAMP)
 	+$(BUILD_TOOL) -C '$(BUILD_DIR)' $@
 
 .PHONY: distclean
