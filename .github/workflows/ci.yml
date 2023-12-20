@@ -19,8 +19,9 @@ jobs:
       - run: echo "::add-matcher::.github/workflows/gcc_matcher.json"
       - uses: carlosperate/arm-none-eabi-gcc-action@v1
       - run: pip install elf-size-analyze
+      - run: sudo apt-get update && sudo apt-get install binutils-dev
       - if: matrix.compiler == 'clang'
-        run: sudo apt-get update && sudo apt-get install llvm
+        run: sudo apt-get install llvm
       - uses: actions/cache@v3
         with:
           path: target/_deps
