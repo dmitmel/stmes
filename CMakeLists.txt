@@ -8,6 +8,11 @@ if(NOT DEFINED CMAKE_EXPORT_COMPILE_COMMANDS)
   set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 endif()
 
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/tools_subproject_wrapper.cmake")
+configure_tools_subproject_wrapper()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/CMakeLists.txt")
+include("${CMAKE_CURRENT_BINARY_DIR}/tools/targets_info.cmake")
+
 project(stmes LANGUAGES C)
 
 if(POLICY CMP0135)
@@ -21,7 +26,6 @@ option(FETCHCONTENT_QUIET "" OFF)  # Output download progress and other logs
 option(FETCHCONTENT_UPDATES_DISCONNECTED "" ON)  # Don't check for updates every time
 
 include(FetchContent)
-include(ExternalProject)
 
 set(DEPENDENCIES_DIR "" CACHE FILEPATH "The directory in which the dependencies will be downloaded and unpacked")
 if(DEPENDENCIES_DIR STREQUAL "")
@@ -73,16 +77,6 @@ FetchContent_Declare(stm32_mw_usb_host
   DOWNLOAD_DIR "${DEPENDENCIES_DIR}"
   SOURCE_DIR "${DEPENDENCIES_DIR}/stm32_mw_usb_host"
   DOWNLOAD_NAME "stm32_mw_usb_host_v3.3.4.tar.gz"
-)
-
-# TODO comments
-ExternalProject_Add(tools
-  PREFIX "${CMAKE_BINARY_DIR}/_deps/tools-prefix"
-  BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/tools"
-  SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tools"
-  DOWNLOAD_COMMAND ""
-  INSTALL_COMMAND ""  # An empty string suppresses this step since at least CMake 3.10
-  BUILD_ALWAYS YES    # TODO
 )
 
 get_property(project_languages GLOBAL PROPERTY ENABLED_LANGUAGES)
@@ -257,19 +251,8 @@ add_executable(firmware)
 # This is the correct way of setting the file extension for a binary:
 set_target_properties(firmware PROPERTIES PREFIX "" SUFFIX ".elf")
 
-# <https://gcc.gnu.org/onlinedocs/gcc/Warning-Options.html>
-# TODO: Enable more warnings:
-# <https://github.com/embeddedartistry/meson-buildsystem/blob/d4de8c83f97cb6389d9895548b555220f9c56e53/compiler/meson.build#L8-L49>
-# <https://github.com/embeddedartistry/meson-buildsystem/blob/d4de8c83f97cb6389d9895548b555220f9c56e53/compiler/cpp/meson.build#L11-L21>
-# <https://github.com/embeddedartistry/cmake-buildsystem/blob/f442d5ddbdd87f7590cb06cdbf6c319fa119578e/compiler/DefaultCompilerSettings.cmake#L9-L69>
-target_compile_options(firmware PRIVATE
-  -Wall -Wextra -Wpedantic -pedantic-errors
-  -Werror=return-type
-  -Wdouble-promotion
-  -Wmissing-declarations
-  -Werror=float-conversion
-  $<$<COMPILE_LANGUAGE:C>:-Werror=strict-prototypes>
-)
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/common_flags.cmake")
+add_common_flags_to_target(firmware)
 
 target_link_libraries(firmware PUBLIC
   stm32f4xx_hal stm32_usb_host FatFs printf m
@@ -307,9 +290,8 @@ target_link_options(firmware PRIVATE LINKER:--cref,-Map=${linker_map_file})
 set_property(TARGET firmware APPEND PROPERTY ADDITIONAL_CLEAN_FILES "${linker_map_file}")
 
 add_dependencies(firmware tools)
-set(linker_plugin_file "${CMAKE_CURRENT_BINARY_DIR}/tools/libtest_linker_plugin.so")
-target_link_options(firmware PRIVATE LINKER:-plugin,${linker_plugin_file})
-set_property(TARGET firmware APPEND PROPERTY LINK_DEPENDS "${linker_plugin_file}")
+target_link_options(firmware PRIVATE LINKER:-plugin,${tools__test_linker_plugin__path})
+set_property(TARGET firmware APPEND PROPERTY LINK_DEPENDS "${tools__test_linker_plugin__path}")
 
 include(CheckCCompilerFlag)
 # A replacement for the CheckLinkerFlag module, added in CMake v3.18, which

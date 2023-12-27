@@ -28,6 +28,8 @@ BUILD_DIR ?= target/$(CMAKE_BUILD_TYPE)
 DEPENDENCIES_DIR ?= target/_deps
 override CMAKE_FLAGS += -DDEPENDENCIES_DIR='$(DEPENDENCIES_DIR)'
 
+override CMAKE_FLAGS += --warn-uninitialized
+
 # Include the local overrides file in case it exists.
 -include local.mk
 
@@ -109,3 +111,8 @@ all firmware tools upload clean: | $(BUILD_DIR_STAMP)
 # Completely deletes the build directory.
 distclean:
 	rm -rf 'target'
+
+compile_commands.json: $(BUILD_DIR)/compile_commands.json
+tools/compile_commands.json: $(BUILD_DIR)/tools/compile_commands.json
+compile_commands.json tools/compile_commands.json: | $(BUILD_DIR_STAMP)
+	ln -sr '$<' '$@'
