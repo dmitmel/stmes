@@ -1,0 +1,13 @@
+# vi:ft=dosini:
+
+[constants]
+cpu_flags = ['-mthumb', '-mcpu=cortex-m4', '-mfloat-abi=hard', '-mfpu=fpv4-sp-d16', '-mno-unaligned-access']
+
+[built-in options]
+c_args = cpu_flags
+c_link_args = cpu_flags
+cpp_args = cpu_flags
+cpp_link_args = cpu_flags
+
+[host_machine]
+cpu = 'cortex-m4'

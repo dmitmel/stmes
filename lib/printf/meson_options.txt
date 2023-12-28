@@ -1,0 +1,8 @@
+option('ntoa-buffer-size', type: 'string', value: '32U')
+option('ftoa-buffer-size', type: 'string', value: '32U')
+option('support-float', type: 'boolean', value: true)
+option('support-exponential', type: 'boolean', value: true)
+option('float-precision', type: 'string', value: '6U')
+option('max-float', type: 'string', value: '1e9')
+option('support-long-long', type: 'boolean', value: true)
+option('support-ptrdiff-t', type: 'boolean', value: true)

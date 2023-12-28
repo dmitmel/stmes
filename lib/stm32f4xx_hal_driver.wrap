@@ -1,0 +1,7 @@
+[wrap-file]
+directory = stm32f4xx_hal_driver-1.8.1
+source_url = https://codeload.github.com/STMicroelectronics/stm32f4xx_hal_driver/tar.gz/refs/tags/v1.8.1
+source_fallback_url = https://github.com/STMicroelectronics/stm32f4xx_hal_driver/archive/refs/tags/v1.8.1.tar.gz
+source_filename = stm32f4xx_hal_driver-1.8.1.tar.gz
+source_hash = d3ffce7d0ecef8a02f893b3341336f54dad0f7d7047328c353f3dcaa1db36312
+patch_directory = stm32f4xx_hal_driver

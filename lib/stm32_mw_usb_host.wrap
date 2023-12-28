@@ -1,0 +1,7 @@
+[wrap-file]
+directory = stm32_mw_usb_host-3.3.4
+source_url = https://codeload.github.com/STMicroelectronics/stm32_mw_usb_host/tar.gz/refs/tags/v3.3.4
+source_fallback_url = https://github.com/STMicroelectronics/stm32_mw_usb_host/archive/refs/tags/v3.3.4.tar.gz
+source_filename = stm32_mw_usb_host-3.3.4.tar.gz
+source_hash = 454d3e27c0245c4545a400b7d583c964a00bdca35d9a9f60e3190e05524b0c5e
+patch_directory = stm32_mw_usb_host

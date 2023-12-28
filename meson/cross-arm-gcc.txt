@@ -1,0 +1,17 @@
+# vi:ft=dosini:
+
+[constants]
+triple = 'arm-none-eabi'
+
+[binaries]
+c     = triple + '-gcc'
+cpp   = triple + '-c++'
+ar    = triple + '-gcc-ar'
+ld    = triple + '-ld'
+strip = triple + '-strip'
+
+[host_machine]
+system = 'none'
+cpu_family = 'arm'
+cpu = 'arm-generic'
+endian = 'little'

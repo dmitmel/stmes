@@ -1,0 +1,16 @@
+# vi:ft=dosini:
+
+[constants]
+triple = 'arm-none-eabi'
+
+[binaries]
+c     = ['clang',   '--target=' + triple]
+cpp   = ['clang++', '--target=' + triple]
+ar    = 'llvm-ar'
+strip = 'llvm-strip'
+
+[host_machine]
+system = 'none'
+cpu_family = 'arm'
+cpu = 'arm-generic'
+endian = 'little'

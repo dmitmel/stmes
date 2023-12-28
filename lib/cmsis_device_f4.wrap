@@ -1,0 +1,7 @@
+[wrap-file]
+directory = cmsis_device_f4-2.6.8
+source_url = https://codeload.github.com/STMicroelectronics/cmsis_device_f4/tar.gz/refs/tags/v2.6.8
+source_fallback_url = https://github.com/STMicroelectronics/cmsis_device_f4/archive/refs/tags/v2.6.8.tar.gz
+source_filename = cmsis_device_f4-2.6.8.tar.gz
+source_hash = 6390baf3ea44aff09d0327a3c112c6ca44418806bfdfe1c5c2803941c391fdce
+patch_directory = cmsis_device_f4
