@@ -251,6 +251,8 @@ add_executable(firmware)
 # This is the correct way of setting the file extension for a binary:
 set_target_properties(firmware PROPERTIES PREFIX "" SUFFIX ".elf")
 
+add_dependencies(firmware tools)
+
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/common_flags.cmake")
 add_common_flags_to_target(firmware)
 
@@ -289,9 +291,8 @@ set(linker_map_file $<TARGET_FILE:firmware>.map)
 target_link_options(firmware PRIVATE LINKER:--cref,-Map=${linker_map_file})
 set_property(TARGET firmware APPEND PROPERTY ADDITIONAL_CLEAN_FILES "${linker_map_file}")
 
-add_dependencies(firmware tools)
-target_link_options(firmware PRIVATE LINKER:-plugin,${tools__test_linker_plugin__path})
-set_property(TARGET firmware APPEND PROPERTY LINK_DEPENDS "${tools__test_linker_plugin__path}")
+# target_link_options(firmware PRIVATE LINKER:-plugin,${tools__test_linker_plugin__path})
+# set_property(TARGET firmware APPEND PROPERTY LINK_DEPENDS "${tools__test_linker_plugin__path}")
 
 include(CheckCCompilerFlag)
 # A replacement for the CheckLinkerFlag module, added in CMake v3.18, which
