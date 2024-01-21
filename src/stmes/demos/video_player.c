@@ -4,6 +4,7 @@
 #include "stmes/gpio.h"
 #include "stmes/kernel/crash.h"
 #include "stmes/kernel/task.h"
+#include "stmes/kernel/time.h"
 #include "stmes/utils.h"
 #include "stmes/video/framebuf.h"
 #include "stmes/video/vga.h"
@@ -62,6 +63,7 @@ void video_player_demo(void) {
 
   check_fs_error(f_mount(&SDFatFS, "", 1));
   check_fs_error(f_open(&SDFile, "bebop_palette.bin", FA_READ));
+  const u32 VIDEO_FRAME_RATE = 24;
 
   struct __PACKED video_header {
     u16 width;
@@ -101,13 +103,15 @@ void video_player_demo(void) {
     ASSERT(row->data != NULL);
   }
 
-  usize frame_nr = 0, frame_counter = 0;
+  usize frame_nr = 0;
   u32 next_row_offset = 0, prev_row_offset = 0, frame_deltas_offset = 0;
   u32 video_palette[8];
 
+  Systime video_start_time = systime_now();
+
   bool show_console = false;
   while (true) {
-    if (button_pressed) {
+    if (unlikely(button_pressed)) {
       button_pressed = false;
       show_console = !show_console;
       struct PixelDmaBuffer* frontbuf = swap_pixel_dma_buffers();
@@ -119,8 +123,9 @@ void video_player_demo(void) {
     bool load_next_frame = false;
     if (unlikely(vga_control.entering_vblank)) {
       vga_control.entering_vblank = false;
-      frame_counter++;
-      if (frame_counter % 2 == 0) {
+      Systime next_frame_time =
+        video_start_time + systime_from_millis(frame_nr * 1000) / VIDEO_FRAME_RATE;
+      if (systime_now() >= next_frame_time) {
         load_next_frame = true;
       }
 
@@ -139,6 +144,7 @@ void video_player_demo(void) {
         next_row_offset = 0;
         prev_row_offset = 0;
         frame_deltas_offset = 0;
+        video_start_time = systime_now();
       }
 
       static struct BufferedReader frames_reader;
