@@ -2,6 +2,7 @@
 #include "stmes/interrupts.h"
 #include "stmes/kernel/crash.h"
 #include "stmes/kernel/task.h"
+#include "stmes/stm32_hal_utils.h"
 #include <stm32f4xx_hal.h>
 #include <stm32f4xx_ll_rcc.h>
 #include <stm32f4xx_ll_tim.h>

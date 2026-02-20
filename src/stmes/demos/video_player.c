@@ -11,7 +11,6 @@
 #include "stmes/video/vga_color.h"
 #include <ff.h>
 #include <stdlib.h>
-#include <stm32f4xx_hal.h>
 #include <stm32f4xx_ll_gpio.h>
 
 static void button_task_fn(void* user_data) {

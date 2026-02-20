@@ -10,7 +10,6 @@
 #include "stmes/video/vga_color.h"
 #include <math.h>
 #include <printf.h>
-#include <stm32f4xx_hal.h>
 #include <usbh_core.h>
 #include <usbh_hid.h>
 

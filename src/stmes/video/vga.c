@@ -62,8 +62,8 @@
 #include "stmes/drivers/dma.h"
 #include "stmes/gpio.h"
 #include "stmes/interrupts.h"
-#include "stmes/kernel/crash.h"
 #include "stmes/kernel/task.h"
+#include "stmes/stm32_hal_utils.h"
 #include "stmes/utils.h"
 #include <math.h>
 #include <stm32f4xx_hal.h>

@@ -54,6 +54,7 @@
 #include "stmes/kernel/sync.h"
 #include "stmes/kernel/task.h"
 #include <printf.h>
+#include <stm32f4xx.h>
 #include <stm32f4xx_ll_gpio.h>
 #include <stm32f4xx_ll_rcc.h>
 #include <stm32f4xx_ll_sdmmc.h>

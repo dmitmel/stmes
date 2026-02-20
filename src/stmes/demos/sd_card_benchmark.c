@@ -6,9 +6,7 @@
 #include "stmes/video/console.h"
 #include "stmes/video/vga.h"
 #include <ff.h>
-#include <math.h>
 #include <printf.h>
-#include <stm32f4xx_hal.h>
 
 #include <diskio.h>
 

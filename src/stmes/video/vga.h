@@ -2,7 +2,6 @@
 
 #include "stmes/utils.h"
 #include "stmes/video/vga_color.h"
-#include <stm32f4xx_hal.h>
 
 #ifdef __cplusplus
 extern "C" {

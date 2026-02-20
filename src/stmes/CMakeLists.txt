@@ -5,6 +5,7 @@ target_sources(firmware PRIVATE
   main.c
   newlib_support.c
   utils.c
+  stm32_hal_utils.c
 )
 
 add_subdirectory(demos)

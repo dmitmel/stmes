@@ -1,4 +1,5 @@
 #include "stmes/video/framebuf.h"
+#include "stmes/stm32_hal_utils.h"
 
 static struct PixelDmaBuffer pixel_dma_buf_1 = { 0 }, pixel_dma_buf_2 = { 0 };
 static bool pixel_dma_buffers_swapped = false;

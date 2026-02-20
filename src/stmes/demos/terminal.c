@@ -6,7 +6,6 @@
 #include "stmes/video/vga.h"
 #include <ff.h>
 #include <printf.h>
-#include <stm32f4xx_hal.h>
 
 static u8 render_task_stack[1024] __ALIGNED(8);
 static struct Task render_task;

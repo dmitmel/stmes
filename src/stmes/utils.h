@@ -84,14 +84,9 @@ void fast_memcpy_u16(u16* dst, const u16* src, usize n);
 void fast_memcpy_u32(u32* dst, const u32* src, usize n);
 
 // <https://stackoverflow.com/q/19965076/12005228>
-#define COMPILER_MEMORY_BARRIER() __ASM volatile("" ::: "memory")
+#define COMPILER_MEMORY_BARRIER() __ASM volatile("" :: : "memory")
 #define WAIT_FOR_EVENT() __WFE()
 #define WAIT_FOR_INTERRUPT() __WFI()
-
-#define BITBAND_ADDR(base, bb_base, addr, bit) \
-  ((volatile u32*)(bb_base + 32ul * ((usize)(addr) - (base)) + 4ul * (bit)))
-#define SRAM1_BITBAND_ADDR(addr, bit) BITBAND_ADDR(SRAM1_BASE, SRAM1_BB_BASE, addr, bit)
-#define PERIPH_BITBAND_ADDR(addr, bit) BITBAND_ADDR(PERIPH_BASE, PERIPH_BB_BASE, addr, bit)
 
 #define interrupt_number() (__get_IPSR())
 #define in_interrupt_handler() (__get_IPSR() != 0)
@@ -112,9 +107,9 @@ i32 humanize_bytes(char* buf, usize buf_size, i64 bytes);
 #define u32_to_be(x) ((u32)(x))
 #endif
 
-#define is_power_of_two(x) (((x) & ((x)-1)) == 0)
-#define is_aligned(x, align) (((x) & ((align)-1)) == 0)
-#define align_to(x, align) ((x) & ~((align)-1))
+#define is_power_of_two(x) (((x) & ((x) - 1)) == 0)
+#define is_aligned(x, align) (((x) & ((align) - 1)) == 0)
+#define align_to(x, align) ((x) & ~((align) - 1))
 #define test_bit(x, bit) (((x) & (bit)) != 0)
 #define test_any_bit(x, bit) (((x) & (bit)) != 0)
 #define test_all_bits(x, bit) (((x) & (bit)) == bit)

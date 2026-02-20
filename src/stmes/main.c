@@ -5,6 +5,7 @@
 #include "stmes/kernel/mpu.h"
 #include "stmes/kernel/task.h"
 #include "stmes/kernel/time.h"
+#include "stmes/stm32_hal_utils.h"
 #include "stmes/utils.h"
 #include "stmes/video/console.h"
 #include "stmes/video/vga.h"

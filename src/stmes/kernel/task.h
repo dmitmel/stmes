@@ -2,7 +2,7 @@
 
 #include "stmes/kernel/time.h"
 #include "stmes/utils.h"
-#include <stm32f4xx_hal.h>
+#include <stm32f4xx.h>
 
 #ifdef __cplusplus
 extern "C" {

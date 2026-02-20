@@ -6,7 +6,6 @@
 #include "stmes/video/vga_color.h"
 #include <ff.h>
 #include <stdlib.h>
-#include <stm32f4xx_hal.h>
 
 void image_viewer_demo(void) {
   static FATFS SDFatFS;

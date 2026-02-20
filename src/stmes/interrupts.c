@@ -1,6 +1,5 @@
 #include "stmes/interrupts.h"
 #include "stmes/utils.h"
-#include <stm32f4xx_hal.h>
 
 extern u32 _estack;
 

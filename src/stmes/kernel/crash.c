@@ -61,7 +61,7 @@
 #include "stmes/video/console.h"
 #include "stmes/video/vga.h"
 #include <printf.h>
-#include <stm32f4xx_hal.h>
+#include <stm32f4xx.h>
 #include <stm32f4xx_ll_gpio.h>
 
 // The memory for storing the crash context information is allocated statically
@@ -666,26 +666,6 @@ __NO_RETURN void enter_crash_screen(void) {
     }
   }
 }
-
-__NO_RETURN void crash_on_hal_error(HAL_StatusTypeDef code, const char* file, u32 line) {
-  const char* name;
-  switch (code) {
-    case HAL_OK: name = "OK"; break;
-    case HAL_ERROR: name = "ERROR"; break;
-    case HAL_BUSY: name = "BUSY"; break;
-    case HAL_TIMEOUT: name = "TIMEOUT"; break;
-    default: name = "UNKNOWN";
-  }
-  char msg[32];
-  snprintf(msg, sizeof(msg), "0x%02" PRIX32 "/HAL_%s", (u32)code, name);
-  crash(msg, file, line);
-}
-
-#ifdef USE_FULL_ASSERT
-void assert_failed(u8* file, u32 line) {
-  crash("STM32 HAL assertion failed", (const char*)file, line);
-}
-#endif
 
 void crash_init_hard_faults(void) {
   // Enable UsageFaults on division by zero and unaligned memory access.

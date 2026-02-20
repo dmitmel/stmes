@@ -6,7 +6,6 @@
 #include <ff.h>
 #include <printf.h>
 #include <stdlib.h>
-#include <stm32f4xx_hal.h>
 #include <stm32f4xx_ll_sdmmc.h>
 
 #include <diskio.h>

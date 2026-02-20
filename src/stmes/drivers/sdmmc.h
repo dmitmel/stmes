@@ -3,7 +3,7 @@
 #include "stmes/kernel/crash.h"
 #include "stmes/kernel/time.h"
 #include "stmes/utils.h"
-#include <stm32f4xx_hal.h>
+#include <stm32f4xx.h>
 #include <stm32f4xx_ll_sdmmc.h>
 
 #ifdef __cplusplus

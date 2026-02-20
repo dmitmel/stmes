@@ -68,6 +68,7 @@
 // TODO: Stack pointer range checks
 
 #include "stmes/kernel/unwind.h"
+#include "stm32f4xx.h"
 #include "stmes/kernel/crash.h"
 #include "stmes/kernel/task.h"
 #include "stmes/utils.h"

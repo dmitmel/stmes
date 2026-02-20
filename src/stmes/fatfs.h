@@ -3,7 +3,6 @@
 #include "stmes/kernel/crash.h"
 #include "stmes/utils.h"
 #include <ff.h>
-#include <stm32f4xx_hal.h>
 
 #ifdef __cplusplus
 extern "C" {

@@ -40,7 +40,7 @@
 #include "stmes/kernel/mpu.h"
 #include "stmes/kernel/crash.h"
 #include "stmes/utils.h"
-#include <stm32f4xx_hal.h>
+#include <stm32f4xx.h>
 
 struct MpuRegionConfig {
   usize base_addr;
