@@ -43,7 +43,7 @@ endif()
 # based on ARM Cortex-M processors and working with their built-in peripherals.
 FetchContent_Declare(cmsis_core_cm4
   URL "https://github.com/STMicroelectronics/cmsis_core/archive/refs/tags/v5.4.0_cm4.tar.gz"
-  URL_HASH SHA256=f711074a546bce04426c35e681446d69bc177435cd8f2f1395a52db64f52d100
+  URL_HASH SHA256=32f226c31d7d1ff4a504404400603e047b99f405cd0c9a8f417f1f250251b829
   DOWNLOAD_DIR "${DEPENDENCIES_DIR}"
   SOURCE_DIR "${DEPENDENCIES_DIR}/cmsis_core_cm4"
   DOWNLOAD_NAME "cmsis_core_cm4_v5.4.0_cm4.tar.gz"
@@ -55,7 +55,7 @@ FetchContent_Declare(cmsis_core_cm4
 # for the peripherals available on the F4 series and system startup files.
 FetchContent_Declare(cmsis_device_f4
   URL "https://github.com/STMicroelectronics/cmsis_device_f4/archive/refs/tags/v2.6.8.tar.gz"
-  URL_HASH SHA256=6390baf3ea44aff09d0327a3c112c6ca44418806bfdfe1c5c2803941c391fdce
+  URL_HASH SHA256=1d9612ecaaab8708c88be2c9573927f2e5e9a911aa2c1427182b545ed5ed0fd6
   DOWNLOAD_DIR "${DEPENDENCIES_DIR}"
   SOURCE_DIR "${DEPENDENCIES_DIR}/cmsis_device_f4"
   DOWNLOAD_NAME "cmsis_device_f4_v2.6.8.tar.gz"
@@ -64,7 +64,7 @@ FetchContent_Declare(cmsis_device_f4
 # Portable HAL (Hardware Abstraction Library) for STM32F4xx microcontrollers.
 FetchContent_Declare(stm32f4xx_hal_driver
   URL "https://github.com/STMicroelectronics/stm32f4xx_hal_driver/archive/refs/tags/v1.8.1.tar.gz"
-  URL_HASH SHA256=d3ffce7d0ecef8a02f893b3341336f54dad0f7d7047328c353f3dcaa1db36312
+  URL_HASH SHA256=ec64ebfc4c98e554dec883f888a351f4676f9e30373963c82ddbe5d3d9afd48f
   DOWNLOAD_DIR "${DEPENDENCIES_DIR}"
   SOURCE_DIR "${DEPENDENCIES_DIR}/stm32f4xx_hal_driver"
   DOWNLOAD_NAME "stm32f4xx_hal_driver_v1.8.1.tar.gz"
@@ -73,7 +73,7 @@ FetchContent_Declare(stm32f4xx_hal_driver
 # USB host middleware for STM32 microcontrollers based around the STM32 HAL.
 FetchContent_Declare(stm32_mw_usb_host
   URL "https://github.com/STMicroelectronics/stm32_mw_usb_host/archive/refs/tags/v3.3.4.tar.gz"
-  URL_HASH SHA256=454d3e27c0245c4545a400b7d583c964a00bdca35d9a9f60e3190e05524b0c5e
+  URL_HASH SHA256=e6432c89682ee454ecbf4cad82bbba434f2b5755d37e1879814bf482a6f08eff
   DOWNLOAD_DIR "${DEPENDENCIES_DIR}"
   SOURCE_DIR "${DEPENDENCIES_DIR}/stm32_mw_usb_host"
   DOWNLOAD_NAME "stm32_mw_usb_host_v3.3.4.tar.gz"
