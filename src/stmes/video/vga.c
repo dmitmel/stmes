@@ -229,11 +229,13 @@ void vga_init(void) {
   // connection" in RM0383.
 
   // TIM1 <- TIM5/TIM2/TIM3/TIM4
-  // TIM2 <- TIM1/----/TIM3/TIM4
+  // TIM2 <- TIM1/TIM8/TIM3/TIM4
   // TIM3 <- TIM1/TIM2/TIM5/TIM4
-  // TIM4 <- TIM1/TIM2/TIM3/----
-  // TIM5 <- TIM2/TIM3/TIM4/----
+  // TIM4 <- TIM1/TIM2/TIM3/TIM8
+  // TIM5 <- TIM2/TIM3/TIM4/TIM8
+  // TIM8 <- TIM1/TIM2/TIM4/TIM5
   // TIM9 <- TIM2/TIM3/TIM10/TIM11
+  // TIM12<- TIM4/TIM5/TIM13/TIM14
 
   {
     TIM_HandleTypeDef* htim = &vga_pixel_timer;
@@ -325,33 +327,33 @@ void vga_init(void) {
     // Preloading the register won't hurt I guess...
     __HAL_TIM_ENABLE_OCxPRELOAD(htim, TIM_CHANNEL_1);
 
-    // The channel 2 generates output compare events at the end of every line
-    // and triggers the corresponding interrupt.
-    TIM_OC_InitTypeDef channel2_init = {
-      .OCMode = TIM_OCMODE_TIMING,
-      .Pulse = 0,
-      .OCPolarity = TIM_OCPOLARITY_HIGH,
-      .OCFastMode = TIM_OCFAST_DISABLE,
-    };
-    check_hal_error(HAL_TIM_OC_ConfigChannel(htim, &channel2_init, TIM_CHANNEL_2));
-    __HAL_TIM_ENABLE_OCxPRELOAD(htim, TIM_CHANNEL_2);
-
     // The horizontal synchronization pulse is generated using the PWM mode of
-    // the channel 3. This little trick lets me completely ignore the concerns
+    // the channel 2. This little trick lets me completely ignore the concerns
     // of sync pulses in the rest of the driver. However, due to the simplistic
     // logic of PWM activation (high if CNT < CCRx, low if CNT >= CCRx) the
     // timer's phase needs to be shifted so that the counter compare value lies
     // on the sync pulse start time and the pulse ends at the auto-reload point
     // (channel 1 is necessary precisely to account for this phase shift).
-    TIM_OC_InitTypeDef channel3_init = {
+    TIM_OC_InitTypeDef channel2_init = {
       .OCMode = TIM_OCMODE_PWM1,
       .Pulse = 0,
       .OCPolarity = TIM_OCPOLARITY_HIGH,
       .OCFastMode = TIM_OCFAST_DISABLE,
     };
-    check_hal_error(HAL_TIM_PWM_ConfigChannel(htim, &channel3_init, TIM_CHANNEL_3));
+    check_hal_error(HAL_TIM_PWM_ConfigChannel(htim, &channel2_init, TIM_CHANNEL_2));
     // The output compare register is configured by HAL to be preloaded by
     // default for PWM channels.
+
+    // The channel 3 generates output compare events at the end of every line
+    // and triggers the corresponding interrupt.
+    TIM_OC_InitTypeDef channel3_init = {
+      .OCMode = TIM_OCMODE_TIMING,
+      .Pulse = 0,
+      .OCPolarity = TIM_OCPOLARITY_HIGH,
+      .OCFastMode = TIM_OCFAST_DISABLE,
+    };
+    check_hal_error(HAL_TIM_OC_ConfigChannel(htim, &channel3_init, TIM_CHANNEL_3));
+    __HAL_TIM_ENABLE_OCxPRELOAD(htim, TIM_CHANNEL_3);
 
     GPIO_InitTypeDef gpio_init = {
       .Pin = VGA_HSYNC_PIN,
@@ -398,28 +400,28 @@ void vga_init(void) {
     };
     check_hal_error(HAL_TIM_SlaveConfigSynchro(htim, &slave_init));
 
-    // Channel 1 is used for triggering an interrupt at requested vertical
-    // positions, which the driver uses for switching its phases.
-    TIM_OC_InitTypeDef channel1_init = {
-      .OCMode = TIM_OCMODE_TIMING,
-      .Pulse = 0,
-      .OCPolarity = TIM_OCPOLARITY_HIGH,
-      .OCFastMode = TIM_OCFAST_DISABLE,
-    };
-    check_hal_error(HAL_TIM_OC_ConfigChannel(htim, &channel1_init, TIM_CHANNEL_1));
-    // Output compare register preload MUST NOT be enabled here because we will
-    // be changing the CCRx while the timer is ticking.
-
     // The same PWM trick as described above is used for generating the
-    // vertical synchronization pulses on channel 2. The caveat regarding the
+    // vertical synchronization pulses on channel 1. The caveat regarding the
     // need for phase shift applies here as well.
-    TIM_OC_InitTypeDef channel2_init = {
+    TIM_OC_InitTypeDef channel1_init = {
       .OCMode = TIM_OCMODE_PWM1,
       .Pulse = 0,
       .OCPolarity = TIM_OCPOLARITY_HIGH,
       .OCFastMode = TIM_OCFAST_DISABLE,
     };
-    check_hal_error(HAL_TIM_PWM_ConfigChannel(htim, &channel2_init, TIM_CHANNEL_2));
+    check_hal_error(HAL_TIM_PWM_ConfigChannel(htim, &channel1_init, TIM_CHANNEL_1));
+
+    // Channel 2 is used for triggering an interrupt at requested vertical
+    // positions, which the driver uses for switching its phases.
+    TIM_OC_InitTypeDef channel2_init = {
+      .OCMode = TIM_OCMODE_TIMING,
+      .Pulse = 0,
+      .OCPolarity = TIM_OCPOLARITY_HIGH,
+      .OCFastMode = TIM_OCFAST_DISABLE,
+    };
+    check_hal_error(HAL_TIM_OC_ConfigChannel(htim, &channel2_init, TIM_CHANNEL_2));
+    // Output compare register preload MUST NOT be enabled here because we will
+    // be changing the CCRx while the timer is ticking.
 
     GPIO_InitTypeDef gpio_init = {
       .Pin = VGA_VSYNC_PIN,
@@ -478,8 +480,8 @@ void vga_apply_timings(const struct VgaTimings* ts) {
     whole_line = (u32)roundf(whole_line * pixel_freq_ratio);
   }
 
-  LL_TIM_DisableIT_CC1(vsync_tim);
-  LL_TIM_DisableIT_CC2(hsync_tim);
+  LL_TIM_DisableIT_CC2(vsync_tim);
+  LL_TIM_DisableIT_CC3(hsync_tim);
 
   vga_state.active_area_start = vert_back_porch;
   vga_state.active_area_height = active_height;
@@ -497,33 +499,33 @@ void vga_apply_timings(const struct VgaTimings* ts) {
   LL_TIM_SetPrescaler(hsync_tim, apb1_pixel_prescaler - 1);
   LL_TIM_SetAutoReload(hsync_tim, whole_line - 1);
   LL_TIM_OC_SetCompareCH1(hsync_tim, horz_back_porch);
-  LL_TIM_OC_SetCompareCH2(hsync_tim, horz_back_porch + active_width);
-  LL_TIM_OC_SetCompareCH3(hsync_tim, whole_line - hsync_width);
-  LL_TIM_OC_SetPolarity(hsync_tim, LL_TIM_CHANNEL_CH3, hsync_polarity);
+  LL_TIM_OC_SetCompareCH2(hsync_tim, whole_line - hsync_width);
+  LL_TIM_OC_SetCompareCH3(hsync_tim, horz_back_porch + active_width);
+  LL_TIM_OC_SetPolarity(hsync_tim, LL_TIM_CHANNEL_CH2, hsync_polarity);
 
   LL_TIM_SetPrescaler(vsync_tim, 0);
   LL_TIM_SetAutoReload(vsync_tim, whole_frame - 1);
-  LL_TIM_OC_SetCompareCH1(vsync_tim, 0);
-  LL_TIM_OC_SetCompareCH2(vsync_tim, whole_frame - vsync_width);
-  LL_TIM_OC_SetPolarity(vsync_tim, LL_TIM_CHANNEL_CH2, vsync_polarity);
+  LL_TIM_OC_SetCompareCH1(vsync_tim, whole_frame - vsync_width);
+  LL_TIM_OC_SetCompareCH2(vsync_tim, 0);
+  LL_TIM_OC_SetPolarity(vsync_tim, LL_TIM_CHANNEL_CH1, vsync_polarity);
 
-  LL_TIM_ClearFlag_CC1(vsync_tim);
-  LL_TIM_ClearFlag_CC2(hsync_tim);
+  LL_TIM_ClearFlag_CC2(vsync_tim);
+  LL_TIM_ClearFlag_CC3(hsync_tim);
 
   // Apply the prescaler changes immediately (and reset the counters).
   LL_TIM_GenerateEvent_UPDATE(pixel_tim);
   LL_TIM_GenerateEvent_UPDATE(hsync_tim);
   LL_TIM_GenerateEvent_UPDATE(vsync_tim);
 
-  LL_TIM_EnableIT_CC1(vsync_tim);
+  LL_TIM_EnableIT_CC2(vsync_tim);
 }
 
 void vga_start(void) {
   // Start the vsync timer and its channels first. It won't actually start
   // ticking yet since it is clocked by the hsync one.
   check_hal_error(HAL_TIM_Base_Start(&vga_vsync_timer));
-  check_hal_error(HAL_TIM_OC_Start(&vga_vsync_timer, TIM_CHANNEL_1));
-  check_hal_error(HAL_TIM_PWM_Start(&vga_vsync_timer, TIM_CHANNEL_2));
+  check_hal_error(HAL_TIM_OC_Start(&vga_vsync_timer, TIM_CHANNEL_2));
+  check_hal_error(HAL_TIM_PWM_Start(&vga_vsync_timer, TIM_CHANNEL_1));
   // Start the hsync timer. Nothing happens yet either.
   check_hal_error(HAL_TIM_Base_Start(&vga_hsync_timer));
   // The vsync timer is triggered by the channel 1, so at this point the MCU
@@ -531,10 +533,10 @@ void vga_start(void) {
   check_hal_error(HAL_TIM_OC_Start(&vga_hsync_timer, TIM_CHANNEL_1));
   // Now the MCU will start generating pulses on the horizontal synchronization
   // line, which is enough for the monitor to recognize the VGA resolution.
-  check_hal_error(HAL_TIM_PWM_Start(&vga_hsync_timer, TIM_CHANNEL_3));
+  check_hal_error(HAL_TIM_PWM_Start(&vga_hsync_timer, TIM_CHANNEL_2));
   // And finally start the channel with the scanline interrupt, at which point
   // we can begin outputting actual video!
-  check_hal_error(HAL_TIM_OC_Start(&vga_hsync_timer, TIM_CHANNEL_2));
+  check_hal_error(HAL_TIM_OC_Start(&vga_hsync_timer, TIM_CHANNEL_3));
 }
 
 // Triggered by the vsync timer only on the important scanlines, returns the
@@ -595,8 +597,8 @@ __STATIC_FORCEINLINE u32 vga_on_line_start(void) {
       control->next_scanline_nr = 0;
       control->next_scanline_requested = true;
       // Reset and enable the line-drawing interrupt.
-      LL_TIM_ClearFlag_CC2(hsync_tim);
-      LL_TIM_EnableIT_CC2(hsync_tim);
+      LL_TIM_ClearFlag_CC3(hsync_tim);
+      LL_TIM_EnableIT_CC3(hsync_tim);
       // Finally, notify the rest of the system that we are about to enter the
       // rendering phase.
       control->entering_frame = true;
@@ -610,7 +612,7 @@ __STATIC_FORCEINLINE u32 vga_on_line_start(void) {
   // run in an unknown situation, e.g. if the frame config wasn't ready at the
   // start of the frame.
   state->rendering_current_frame = false;
-  LL_TIM_DisableIT_CC2(hsync_tim);
+  LL_TIM_DisableIT_CC3(hsync_tim);
   control->entering_vblank = true;
   return active_area_entry_line;
 }
@@ -756,18 +758,18 @@ __STATIC_FORCEINLINE void vga_on_line_end_reached(void) {
 
 void TIM2_IRQHandler(void) {
   TIM_TypeDef* timer = TIM2;
-  if (LL_TIM_IsActiveFlag_CC2(timer)) {
-    LL_TIM_ClearFlag_CC2(timer);
+  if (LL_TIM_IsActiveFlag_CC3(timer)) {
+    LL_TIM_ClearFlag_CC3(timer);
     vga_on_line_end_reached();
   }
 }
 
 void TIM1_BRK_TIM9_IRQHandler(void) {
   TIM_TypeDef* timer = TIM9;
-  if (LL_TIM_IsActiveFlag_CC1(timer)) {
-    LL_TIM_ClearFlag_CC1(timer);
+  if (LL_TIM_IsActiveFlag_CC2(timer)) {
+    LL_TIM_ClearFlag_CC2(timer);
     u32 line_nr = vga_on_line_start();
-    LL_TIM_OC_SetCompareCH1(timer, line_nr);
+    LL_TIM_OC_SetCompareCH2(timer, line_nr);
     if (task_notify(&vga_notification)) {
       task_yield_from_isr();
     }

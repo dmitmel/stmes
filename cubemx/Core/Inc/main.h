@@ -62,11 +62,9 @@ void Error_Handler(void);
 #define BLTN_KEY_Pin GPIO_PIN_0
 #define BLTN_KEY_GPIO_Port GPIOA
 #define BLTN_KEY_EXTI_IRQn EXTI0_IRQn
-#define SDIO_CD_Pin GPIO_PIN_1
-#define SDIO_CD_GPIO_Port GPIOA
-#define VGA_HSYNC_Pin GPIO_PIN_2
+#define VGA_HSYNC_Pin GPIO_PIN_1
 #define VGA_HSYNC_GPIO_Port GPIOA
-#define VGA_VSYNC_Pin GPIO_PIN_3
+#define VGA_VSYNC_Pin GPIO_PIN_2
 #define VGA_VSYNC_GPIO_Port GPIOA
 #define SDIO_CMD_Pin GPIO_PIN_6
 #define SDIO_CMD_GPIO_Port GPIOA
@@ -90,6 +88,8 @@ void Error_Handler(void);
 #define SDIO_D1_GPIO_Port GPIOA
 #define SDIO_D2_Pin GPIO_PIN_9
 #define SDIO_D2_GPIO_Port GPIOA
+#define SDIO_CD_Pin GPIO_PIN_10
+#define SDIO_CD_GPIO_Port GPIOA
 #define VGA_BLUE4_Pin GPIO_PIN_3
 #define VGA_BLUE4_GPIO_Port GPIOB
 #define SDIO_D0_Pin GPIO_PIN_4
