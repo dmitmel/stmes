@@ -2,7 +2,6 @@
 // <https://sourceware.org/newlib/libc.html#Syscalls>
 // <https://interrupt.memfault.com/blog/boostrapping-libc-with-newlib>
 
-#include "stmes/newlib_support.h"
 #include "stmes/kernel/crash.h"
 #include "stmes/kernel/sync.h"
 #include "stmes/utils.h"
@@ -10,7 +9,9 @@
 #include <errno.h>
 #include <malloc.h>
 #include <printf.h>
+#include <stddef.h>
 #include <sys/lock.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #ifndef __clang__
@@ -50,10 +51,10 @@ void* _sbrk(ptrdiff_t incr) {
   }
 }
 
-int _write(int fd, const char* buf, size_t len) {
+ssize_t _write(int fd, const void* buf, size_t len) {
   if (fd == STDOUT_FILENO || fd == STDERR_FILENO) {
-    for (const char* end = buf + len; buf != end; buf++) {
-      console_putchar(*buf);
+    for (const char *ptr = buf, *end = ptr + len; ptr != end; ptr++) {
+      console_putchar(*ptr);
     }
     return len;
   } else {
@@ -66,7 +67,7 @@ void _putchar(char c) {
   console_putchar(c);
 }
 
-int _read(int fd, char* ptr, size_t len) {
+ssize_t _read(int fd, void* ptr, size_t len) {
   UNUSED(fd), UNUSED(ptr), UNUSED(len);
   errno = EBADF;
   return -1;
@@ -87,6 +88,17 @@ off_t _lseek(int fd, off_t offset, int whence) {
 void _exit(int code) {
   UNUSED(code);
   __builtin_trap();
+}
+
+int _fstat(int file, struct stat* st) {
+  UNUSED(file), UNUSED(st);
+  errno = EBADF;
+  return -1;
+}
+
+int _isatty(int file) {
+  UNUSED(file);
+  return 0;
 }
 
 #ifndef __clang__
