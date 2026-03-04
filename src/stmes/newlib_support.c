@@ -14,6 +14,14 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#if ENABLE_SEGGER_RTT_LOGGING
+#include <SEGGER_RTT.h>
+#endif
+
+#if ENABLE_ARM_SEMIHOSTING
+#include <stdio.h>
+#endif
+
 #ifndef __clang__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmissing-declarations"
@@ -51,11 +59,33 @@ void* _sbrk(ptrdiff_t incr) {
   }
 }
 
-ssize_t _write(int fd, const void* buf, size_t len) {
+#if ENABLE_ARM_SEMIHOSTING
+
+// This is for `../../lib/printf/printf.h`
+void _putchar(char c) {
+  putc(c, stdout);
+}
+
+#else
+
+void _putchar(char c) {
+  console_putchar(c);
+#if ENABLE_SEGGER_RTT_LOGGING
+  while (SEGGER_RTT_PutChar(0, c) != 1);
+#endif
+}
+
+ssize_t _write(int fd, const char* buf, size_t len) {
   if (fd == STDOUT_FILENO || fd == STDERR_FILENO) {
     for (const char *ptr = buf, *end = ptr + len; ptr != end; ptr++) {
       console_putchar(*ptr);
     }
+#if ENABLE_SEGGER_RTT_LOGGING
+    while (len > 0) {
+      unsigned int written = SEGGER_RTT_Write(0, buf, len);
+      buf += written, len -= written;
+    }
+#endif
     return len;
   } else {
     errno = EBADF;
@@ -63,11 +93,7 @@ ssize_t _write(int fd, const void* buf, size_t len) {
   }
 }
 
-void _putchar(char c) {
-  console_putchar(c);
-}
-
-ssize_t _read(int fd, void* ptr, size_t len) {
+ssize_t _read(int fd, char* ptr, size_t len) {
   UNUSED(fd), UNUSED(ptr), UNUSED(len);
   errno = EBADF;
   return -1;
@@ -100,6 +126,8 @@ int _isatty(int file) {
   UNUSED(file);
   return 0;
 }
+
+#endif // ENABLE_ARM_SEMIHOSTING
 
 #ifndef __clang__
 #pragma GCC diagnostic pop
@@ -187,4 +215,4 @@ void __retarget_lock_release_recursive(_LOCK_T lock) {
   mutex_unlock(&lock->mutex);
 }
 
-#endif
+#endif // _RETARGETABLE_LOCKING

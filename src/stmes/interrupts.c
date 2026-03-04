@@ -1,7 +1,11 @@
 #include "stmes/interrupts.h"
 #include "stmes/utils.h"
 
-extern u32 _estack;
+#if ENABLE_SEGGER_RTT_LOGGING
+#include <SEGGER_RTT.h>
+#endif
+
+extern u32 __stack_end;
 
 static void Default_Handler(void) {
   while (true) {}
@@ -76,7 +80,8 @@ ISR_WEAK void FPU_IRQHandler(void);
 ISR_WEAK void SPI4_IRQHandler(void);
 ISR_WEAK void SPI5_IRQHandler(void);
 
-__USED __SECTION(".vector_table") InterruptHandler* const vector_table[15 + 86] = {
+__USED __SECTION(".vector_table") InterruptHandler* const vector_table[16 + 86] = {
+  (InterruptHandler*)(usize)&__stack_end,
   Reset_Handler,
   NMI_Handler,
   HardFault_Handler,
@@ -84,7 +89,11 @@ __USED __SECTION(".vector_table") InterruptHandler* const vector_table[15 + 86] 
   BusFault_Handler,
   UsageFault_Handler,
   0,
+#if ENABLE_SEGGER_RTT_LOGGING
+  (InterruptHandler*)((usize)&_SEGGER_RTT + 0x2),
+#else
   0,
+#endif
   0,
   0,
   SVC_Handler,

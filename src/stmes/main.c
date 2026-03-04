@@ -11,6 +11,10 @@
 #include "stmes/video/vga.h"
 #include <stm32f4xx_hal.h>
 
+#if ENABLE_SEGGER_RTT_LOGGING
+#include <SEGGER_RTT.h>
+#endif
+
 static struct Task main_task;
 static u8 main_task_stack[1024] __ALIGNED(8);
 
@@ -82,7 +86,11 @@ static void prestart(void* initial_stack_ptr) {
   DWT->CYCCNT = 0;
   DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
 
-#ifdef ARM_SEMIHOSTING_ENABLE
+#if ENABLE_SEGGER_RTT_LOGGING
+  SEGGER_RTT_Init();
+#endif
+
+#ifdef ENABLE_ARM_SEMIHOSTING
   // Actually enable the semihosting machinery only when the debugger is attached.
   if (CoreDebug->DHCSR & CoreDebug_DHCSR_C_DEBUGEN_Msk) {
     // <https://github.com/bminor/newlib/blob/048031501043e61ca31713b92ce2190213c7fb21/libgloss/arm/syscalls.c#L141>

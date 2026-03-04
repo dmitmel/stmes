@@ -47,3 +47,12 @@ add_library(stm32_usb_host STATIC ${usb_sources})
 target_include_directories(stm32_usb_host PUBLIC ${usb_includes})
 
 target_link_libraries(stm32_usb_host PUBLIC stm32f4xx_hal)
+
+add_library(segger_rtt STATIC
+  "${segger_rtt_SOURCE_DIR}/RTT/SEGGER_RTT.c"
+  "${segger_rtt_SOURCE_DIR}/RTT/SEGGER_RTT_ASM_ARMv7M.S"
+)
+target_include_directories(segger_rtt PUBLIC
+  "${segger_rtt_SOURCE_DIR}/RTT"
+  "${segger_rtt_SOURCE_DIR}/Config"
+)

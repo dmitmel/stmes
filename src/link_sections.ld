@@ -33,7 +33,6 @@ SECTIONS {
 
   /* The vector table is pinned to the start of ROM */
   .vector_table ORIGIN(flash) : ALIGN(4) {
-    LONG(__stack_end)
     KEEP(*(.vector_table))
   } > flash
 
