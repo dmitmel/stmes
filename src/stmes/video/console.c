@@ -105,7 +105,7 @@ void console_print(const char* str) {
 
 void console_setup_frame_config(void) {
   struct VgaFrameConfig frame = {
-    .line_length = FRAME_WIDTH,
+    .line_length = FRAME_WIDTH + 1,
     .lines_count = FRAME_HEIGHT * PIXEL_SCALE,
     .pixel_scale = PIXEL_SCALE - 1,
     .line_repeats = PIXEL_SCALE - 1,

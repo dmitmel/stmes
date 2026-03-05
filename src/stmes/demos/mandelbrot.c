@@ -228,7 +228,7 @@ static void render_task_fn(__UNUSED void* user_data) {
     if (vga_control.entering_vblank) {
       vga_control.entering_vblank = false;
       struct VgaFrameConfig frame = {
-        .line_length = FRAME_WIDTH,
+        .line_length = FRAME_WIDTH + 1,
         .lines_count = FRAME_HEIGHT * PIXEL_SCALE,
         .pixel_scale = PIXEL_SCALE - 1,
         .line_repeats = PIXEL_SCALE - 1,

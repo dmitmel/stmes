@@ -129,7 +129,7 @@ void video_player_demo(void) {
       }
 
       struct VgaFrameConfig frame = {
-        .line_length = FRAME_WIDTH,
+        .line_length = FRAME_WIDTH + 1,
         .lines_count = FRAME_HEIGHT * PIXEL_SCALE,
         .pixel_scale = PIXEL_SCALE - 1,
         .line_repeats = PIXEL_SCALE - 1,

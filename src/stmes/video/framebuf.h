@@ -13,7 +13,7 @@ extern "C" {
 #define COLOR_BIT_DEPTH 12
 
 struct PixelDmaBuffer {
-  VgaPixel data[FRAME_WIDTH] __ALIGNED(4);
+  VgaPixel data[FRAME_WIDTH + 1] __ALIGNED(4);
   u32 non_zeroes[FRAME_WIDTH / 32];
   volatile u32* non_zeroes_bitband;
 };

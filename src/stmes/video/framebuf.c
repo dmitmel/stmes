@@ -8,6 +8,7 @@ struct PixelDmaBuffer* swap_pixel_dma_buffers(void) {
   pixel_dma_buffers_swapped = !pixel_dma_buffers_swapped;
   struct PixelDmaBuffer* buf = pixel_dma_buffers_swapped ? &pixel_dma_buf_1 : &pixel_dma_buf_2;
   buf->non_zeroes_bitband = SRAM1_BITBAND_ADDR(buf->non_zeroes, 0);
+  buf->data[FRAME_WIDTH] = VGA_ALL_RGB_PINS_RESET;
   return buf;
 }
 
