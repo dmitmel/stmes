@@ -1,0 +1,3 @@
+/* clang-format off */
+#cmakedefine01 ENABLE_SEGGER_RTT_LOGGING
+#cmakedefine01 ENABLE_ARM_SEMIHOSTING

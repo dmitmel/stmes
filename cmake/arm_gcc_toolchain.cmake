@@ -43,7 +43,6 @@ if(ARM_SEMIHOSTING)
   # Forward the syscalls to the host machine connected by a debugger probe with
   # semihosting facility: <https://interrupt.memfault.com/blog/arm-semihosting>
   add_link_options(-specs=rdimon.specs)
-  add_compile_definitions(ENABLE_ARM_SEMIHOSTING)
 else()
   # Provide empty stub functions that do nothing but set `errno` to something
   # along the lines of "unsupported". See their source code here if you don't

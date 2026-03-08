@@ -1,6 +1,8 @@
 #include "stmes/interrupts.h"
 #include "stmes/utils.h"
 
+#include "stmes/config.h" // to check ENABLE_SEGGER_RTT_LOGGING
+
 #if ENABLE_SEGGER_RTT_LOGGING
 #include <SEGGER_RTT.h>
 #endif

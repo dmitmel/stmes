@@ -14,6 +14,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "stmes/config.h"
+
 #if ENABLE_SEGGER_RTT_LOGGING
 #include <SEGGER_RTT.h>
 #endif

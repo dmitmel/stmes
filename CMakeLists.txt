@@ -419,6 +419,6 @@ target_include_directories(stm32f4xx_hal PRIVATE src)   # stm32f4xx_hal_conf.h, 
 target_include_directories(stm32_usb_host PRIVATE src)  # usbh_conf.h
 target_include_directories(FatFs PRIVATE src)           # ffconf.h
 
-target_include_directories(firmware PUBLIC src)
+target_include_directories(firmware PUBLIC src "${CMAKE_CURRENT_BINARY_DIR}/src")
 
 add_subdirectory(src)

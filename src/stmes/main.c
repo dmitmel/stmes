@@ -11,6 +11,8 @@
 #include "stmes/video/vga.h"
 #include <stm32f4xx_hal.h>
 
+#include "stmes/config.h"
+
 #if ENABLE_SEGGER_RTT_LOGGING
 #include <SEGGER_RTT.h>
 #endif
@@ -90,7 +92,7 @@ static void prestart(void* initial_stack_ptr) {
   SEGGER_RTT_Init();
 #endif
 
-#ifdef ENABLE_ARM_SEMIHOSTING
+#if ENABLE_ARM_SEMIHOSTING
   // Actually enable the semihosting machinery only when the debugger is attached.
   if (CoreDebug->DHCSR & CoreDebug_DHCSR_C_DEBUGEN_Msk) {
     // <https://github.com/bminor/newlib/blob/048031501043e61ca31713b92ce2190213c7fb21/libgloss/arm/syscalls.c#L141>
