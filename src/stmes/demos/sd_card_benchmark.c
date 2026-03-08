@@ -4,14 +4,10 @@
 #include "stmes/kernel/task.h"
 #include "stmes/utils.h"
 #include "stmes/video/console.h"
-#include "stmes/video/vga.h"
 #include <ff.h>
 #include <printf.h>
 
 #include <diskio.h>
-
-static u8 render_task_stack[1024] __ALIGNED(8);
-static struct Task render_task;
 
 static u8 test_task_stack[1024] __ALIGNED(8);
 static struct Task test_task;
@@ -134,29 +130,10 @@ static void progress_task_fn(__UNUSED void* user_data) {
   }
 }
 
-static void render_task_fn(__UNUSED void* user_data) {
-  while (true) {
-    task_wait(&vga_notification, NO_DEADLINE);
-    if (vga_control.next_scanline_requested) {
-      vga_control.next_scanline_requested = false;
-      console_render_scanline(vga_control.next_scanline_nr);
-    }
-    if (vga_control.entering_vblank) {
-      vga_control.entering_vblank = false;
-      console_setup_frame_config();
-    }
-  }
-}
-
 void sd_card_benchmark(void) {
   task_notify_init(&progress_task_notify);
 
-  struct TaskParams render_task_params = {
-    .stack_start = render_task_stack,
-    .stack_size = sizeof(render_task_stack),
-    .func = &render_task_fn,
-  };
-  task_spawn(&render_task, &render_task_params);
+  start_console_render_task();
 
   struct TaskParams test_task_params = {
     .stack_start = test_task_stack,

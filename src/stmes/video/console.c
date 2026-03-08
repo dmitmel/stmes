@@ -1,6 +1,7 @@
 // TODO: Lock the state manipulation functions behind a mutex!
 
 #include "stmes/video/console.h"
+#include "stmes/kernel/task.h"
 #include "stmes/utils.h"
 #include "stmes/video/console_font.h"
 #include "stmes/video/framebuf.h"
@@ -248,4 +249,30 @@ void console_init(void) {
     console_palette[i] = rgb12_to_vga_pins(console_palette[i]);
   }
   console_clear_screen();
+}
+
+static void console_render_task_fn(__UNUSED void* param) {
+  while (true) {
+    task_wait(&vga_notification, NO_DEADLINE);
+    if (vga_control.next_scanline_requested) {
+      vga_control.next_scanline_requested = false;
+      console_render_scanline(vga_control.next_scanline_nr);
+    }
+    if (vga_control.entering_vblank) {
+      vga_control.entering_vblank = false;
+      console_setup_frame_config();
+    }
+  }
+}
+
+struct Task console_render_task;
+static u8 console_render_task_stack[1024] __ALIGNED(8);
+
+void start_console_render_task(void) {
+  struct TaskParams render_task_params = {
+    .stack_start = console_render_task_stack,
+    .stack_size = sizeof(console_render_task_stack),
+    .func = &console_render_task_fn,
+  };
+  task_spawn(&console_render_task, &render_task_params);
 }

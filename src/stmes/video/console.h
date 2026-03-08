@@ -30,6 +30,9 @@ void console_init(void);
 void console_setup_frame_config(void);
 bool console_render_scanline(u16 vga_line);
 
+extern struct Task console_render_task;
+void start_console_render_task(void);
+
 #ifdef __cplusplus
 }
 #endif
