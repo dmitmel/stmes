@@ -466,12 +466,12 @@ void vga_apply_timings(const struct VgaTimings* ts) {
   u32 whole_line = active_width + horz_front_porch + hsync_width + horz_back_porch,
       whole_frame = active_height + vert_front_porch + vsync_width + vert_back_porch;
 
-  u32 apb1_pixel_prescaler = calc_timer_prescaler(apb1_freq, ts->pixel_clock_freq, UINT16_MAX),
-      apb2_pixel_prescaler = calc_timer_prescaler(apb2_freq, ts->pixel_clock_freq, UINT16_MAX);
+  u32 hsync_prescaler = calc_timer_prescaler(apb1_freq, ts->pixel_clock_freq, UINT16_MAX),
+      pixel_prescaler = calc_timer_prescaler(apb2_freq, ts->pixel_clock_freq, UINT16_MAX);
 
   // Recalculate the timings if we couldn't get an integer frequency divisor.
-  if (apb1_freq / apb1_pixel_prescaler != ts->pixel_clock_freq) {
-    u32 pixel_clk_freq = apb1_freq / apb1_pixel_prescaler;
+  if (apb1_freq / hsync_prescaler != ts->pixel_clock_freq) {
+    u32 pixel_clk_freq = apb1_freq / hsync_prescaler;
     float pixel_freq_ratio = (float)pixel_clk_freq / (float)ts->pixel_clock_freq;
     hsync_width = (u32)roundf(hsync_width * pixel_freq_ratio);
     active_width = (u32)roundf(active_width * pixel_freq_ratio);
@@ -486,7 +486,7 @@ void vga_apply_timings(const struct VgaTimings* ts) {
   vga_state.active_area_start = vert_back_porch;
   vga_state.active_area_height = active_height;
   vga_state.active_area_width = active_width;
-  vga_state.pixel_timer_prescaler = apb2_pixel_prescaler;
+  vga_state.pixel_timer_prescaler = pixel_prescaler;
   vga_state.rendering_current_frame = false;
 
   // TODO: Investigate methods of calculating both the prescaler and the
@@ -494,13 +494,29 @@ void vga_apply_timings(const struct VgaTimings* ts) {
   // current consumption, however, the timer update events become less precise).
   LL_TIM_SetPrescaler(pixel_tim, 0);
   // NOTE: When ARR=0 the timer is disabled.
-  LL_TIM_SetAutoReload(pixel_tim, apb2_pixel_prescaler - 1);
+  LL_TIM_SetAutoReload(pixel_tim, pixel_prescaler - 1);
 
-  LL_TIM_SetPrescaler(hsync_tim, apb1_pixel_prescaler - 1);
-  LL_TIM_SetAutoReload(hsync_tim, whole_line - 1);
-  LL_TIM_OC_SetCompareCH1(hsync_tim, horz_back_porch);
-  LL_TIM_OC_SetCompareCH2(hsync_tim, whole_line - hsync_width);
-  LL_TIM_OC_SetCompareCH3(hsync_tim, horz_back_porch + active_width);
+  // NOTE: Channel 1 of the hsync timer is used to start the pixel timer, but
+  // triggering other timers through an ITR line introduces a small delay if the
+  // slave timer is located in another clocking domain, which I'm not sure how
+  // to calculate precisely. However, through experimentation I obtained some
+  // values which give almost perfectly aligned signal timings. Fortunately,
+  // this delay seems to only depend on the ratio of APB1 and APB2 frequencies,
+  // which is governed by the APB1 prescaler.
+  u32 hsync_channel1_delay;
+  switch (LL_RCC_GetAPB1Prescaler()) {
+    case RCC_HCLK_DIV1:
+    case RCC_HCLK_DIV2: hsync_channel1_delay = 6; break;
+    case RCC_HCLK_DIV4: hsync_channel1_delay = 2; break;
+    default: hsync_channel1_delay = 0; break;
+  }
+
+  // TODO: Does current consumption by timers really depend on the frequency that much?
+  LL_TIM_SetPrescaler(hsync_tim, 0);
+  LL_TIM_SetAutoReload(hsync_tim, whole_line * hsync_prescaler - 1);
+  LL_TIM_OC_SetCompareCH1(hsync_tim, horz_back_porch * hsync_prescaler - hsync_channel1_delay);
+  LL_TIM_OC_SetCompareCH2(hsync_tim, (whole_line - hsync_width) * hsync_prescaler);
+  LL_TIM_OC_SetCompareCH3(hsync_tim, (horz_back_porch + active_width) * hsync_prescaler);
   LL_TIM_OC_SetPolarity(hsync_tim, LL_TIM_CHANNEL_CH2, hsync_polarity);
 
   LL_TIM_SetPrescaler(vsync_tim, 0);
