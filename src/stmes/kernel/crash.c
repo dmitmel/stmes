@@ -58,7 +58,7 @@
 #include "stmes/interrupts.h"
 #include "stmes/kernel/mpu.h"
 #include "stmes/utils.h"
-#include "stmes/video/console.h"
+#include "stmes/video/terminal.h"
 #include "stmes/video/vga.h"
 #include <printf.h>
 #include <stm32f4xx.h>
@@ -415,15 +415,15 @@ static void print_number(u32 value, u32 base) {
   // that we would then have to reverse.
   for (usize i = 0; i < digits; i++) {
     u32 digit = value / factor % base;
-    console_putchar(digit < 10 ? digit + '0' : digit - 10 + 'A');
+    terminal_putchar(digit < 10 ? digit + '0' : digit - 10 + 'A');
     factor /= base;
   }
 }
 
 static void print_address(u32 value) {
-  u8 text_color = console_get_current_color();
+  u8 text_color = terminal_get_current_color();
   // Make the foreground color dimmer (for the leading zeroes).
-  console_set_color(text_color | 0x8);
+  terminal_set_color(text_color | 0x8);
   bool leading_zeroes = true;
   for (usize i = 0, digits_count = 8; i < digits_count; i++) {
     u32 digit = (value >> 28) & 0xF;
@@ -431,43 +431,43 @@ static void print_address(u32 value) {
       leading_zeroes = false;
       // Once we reached the end leading zeroes or the final zero, switch back
       // to the normal (bright) color.
-      console_set_color(text_color);
+      terminal_set_color(text_color);
     }
-    console_putchar(digit < 10 ? digit + '0' : digit - 10 + 'A');
+    terminal_putchar(digit < 10 ? digit + '0' : digit - 10 + 'A');
     value <<= 4;
   }
 }
 
 static void print_register(const char* name, u32 value) {
-  console_print(name);
-  console_putchar('=');
-  u8 prev_color = console_get_current_color();
-  console_set_color(0x06);
+  terminal_print(name);
+  terminal_putchar('=');
+  u8 prev_color = terminal_get_current_color();
+  terminal_set_color(0x06);
   print_address(value);
-  console_set_color(prev_color);
+  terminal_set_color(prev_color);
 }
 
 static void crash_screen_hardfault_title(void) {
   struct CrashHardfault* ctx = &crash_context.payload.hardfault;
   usize fault_types = 0;
   if (ctx->cfsr & (SCB_CFSR_MEMFAULTSR_Msk & ~SCB_CFSR_MMARVALID_Msk)) {
-    console_print("MemFault");
+    terminal_print("MemFault");
     fault_types++;
   }
   if (ctx->cfsr & (SCB_CFSR_BUSFAULTSR_Msk & ~SCB_CFSR_BFARVALID_Msk)) {
-    if (fault_types > 0) console_print(", ");
-    console_print("BusFault");
+    if (fault_types > 0) terminal_print(", ");
+    terminal_print("BusFault");
     fault_types++;
   }
   if (ctx->cfsr & SCB_CFSR_USGFAULTSR_Msk) {
-    if (fault_types > 0) console_print(", ");
-    console_print("UsageFault");
+    if (fault_types > 0) terminal_print(", ");
+    terminal_print("UsageFault");
     fault_types++;
   }
   if (fault_types == 0) {
-    console_print("HardFault");
+    terminal_print("HardFault");
   } else if (ctx->hfsr & SCB_HFSR_FORCED_Msk) {
-    console_print(", escalated to HardFault");
+    terminal_print(", escalated to HardFault");
   }
 }
 
@@ -518,11 +518,11 @@ static void crash_screen_hardfault_reason(void) {
   for (usize i = 0; i < SIZEOF(FAULT_DESCRIPTORS); i++) {
     const struct FaultDescriptor* desc = &FAULT_DESCRIPTORS[i];
     if ((registers[desc->reg] & desc->mask) != 0) {
-      console_print(desc->str);
+      terminal_print(desc->str);
       if (desc->print != PRINT_NOTHING) {
         print_address(addresses[desc->print]);
       }
-      console_putchar('\n');
+      terminal_putchar('\n');
     }
   }
 }
@@ -551,9 +551,9 @@ static void crash_screen_mpu_diagnosis(void) {
       break;
   }
   if (str == NULL) return;
-  console_print("MPU//");
-  console_print(str);
-  console_putchar('\n');
+  terminal_print("MPU//");
+  terminal_print(str);
+  terminal_putchar('\n');
 }
 
 __NO_RETURN void enter_crash_screen(void) {
@@ -568,51 +568,51 @@ __NO_RETURN void enter_crash_screen(void) {
   // We need at least the VGA interrupts to output something to the screen.
   __enable_irq();
 
-  // console_clear_screen();
-  console_new_line();
-  console_set_color(0x97);
-  console_clear_cursor_line();
-  console_set_color(0x17);
-  console_print(" CRITICAL ERROR ");
-  console_set_color(0x97);
-  console_putchar(' ');
+  // terminal_clear_screen();
+  terminal_new_line();
+  terminal_set_color(0x97);
+  terminal_clear_cursor_line();
+  terminal_set_color(0x17);
+  terminal_print(" CRITICAL ERROR ");
+  terminal_set_color(0x97);
+  terminal_putchar(' ');
 
   if (crash_context.type == CRASH_TYPE_ASSERTION) {
     struct CrashAssertion* ctx = &crash_context.payload.assertion;
     if (ctx->message != NULL) {
-      console_print(ctx->message);
+      terminal_print(ctx->message);
     }
   } else if (crash_context.type == CRASH_TYPE_HARDFAULT) {
     crash_screen_hardfault_title();
   }
 
-  console_putchar(' ');
-  console_set_color(0x07);
-  console_putchar('\n');
-  console_set_color(0x01);
+  terminal_putchar(' ');
+  terminal_set_color(0x07);
+  terminal_putchar('\n');
+  terminal_set_color(0x01);
 
   struct CrashCpuRegisters* regs = &crash_context.cpu_registers;
 
   if (crash_context.type == CRASH_TYPE_ASSERTION) {
     struct CrashAssertion* ctx = &crash_context.payload.assertion;
     if (ctx->src_file != NULL) {
-      console_print(ctx->src_file), console_putchar(':'), print_number(ctx->src_line, 10);
-      console_putchar(' ');
+      terminal_print(ctx->src_file), terminal_putchar(':'), print_number(ctx->src_line, 10);
+      terminal_putchar(' ');
     }
-    console_print("[pc="), print_address((u32)ctx->address), console_print("]\n");
+    terminal_print("[pc="), print_address((u32)ctx->address), terminal_print("]\n");
   } else if (crash_context.type == CRASH_TYPE_HARDFAULT) {
     crash_screen_hardfault_reason();
     crash_screen_mpu_diagnosis();
   }
 
-  console_putchar('\n');
-  console_set_color(0x07);
+  terminal_putchar('\n');
+  terminal_set_color(0x07);
 
   u32 interrupt_nr = crash_context.cpu_registers.xpsr & MASK(9);
   if (interrupt_nr != 0) {
-    console_print("[in ISR ");
+    terminal_print("[in ISR ");
     print_number(interrupt_nr, 10);
-    console_print("]\n");
+    terminal_print("]\n");
   }
 
   if (crash_context.cpu_registers_collected) {
@@ -622,29 +622,29 @@ __NO_RETURN void enter_crash_screen(void) {
     };
     for (usize i = 0; i < 16; i++) {
       print_register(REGISTER_NAMES[i], (&regs->r0)[i]);
-      console_putchar((i + 1) % 4 == 0 ? '\n' : ' ');
+      terminal_putchar((i + 1) % 4 == 0 ? '\n' : ' ');
     }
-    print_register("xPSR", regs->xpsr), console_putchar(' ');
+    print_register("xPSR", regs->xpsr), terminal_putchar(' ');
   } else {
-    console_print("[CPU registers have not been collected]\n");
+    terminal_print("[CPU registers have not been collected]\n");
   }
 
   if (crash_context.type == CRASH_TYPE_HARDFAULT) {
     struct CrashHardfault* ctx = &crash_context.payload.hardfault;
-    print_register("EXC_RETURN", ctx->exc_return), console_putchar('\n');
-    print_register("CSFR", ctx->cfsr), console_putchar(' ');
-    print_register("HSFR", ctx->hfsr), console_putchar(' ');
-    print_register("DSFR", ctx->dfsr), console_putchar('\n');
-    print_register("AFSR", ctx->afsr), console_putchar(' ');
+    print_register("EXC_RETURN", ctx->exc_return), terminal_putchar('\n');
+    print_register("CSFR", ctx->cfsr), terminal_putchar(' ');
+    print_register("HSFR", ctx->hfsr), terminal_putchar(' ');
+    print_register("DSFR", ctx->dfsr), terminal_putchar('\n');
+    print_register("AFSR", ctx->afsr), terminal_putchar(' ');
     if (ctx->cfsr & SCB_CFSR_MMARVALID_Msk) {
-      print_register("MFAR", ctx->mmfar), console_putchar(' ');
+      print_register("MFAR", ctx->mmfar), terminal_putchar(' ');
     }
     if (ctx->cfsr & SCB_CFSR_BFARVALID_Msk) {
-      print_register("BFAR", ctx->bfar), console_putchar(' ');
+      print_register("BFAR", ctx->bfar), terminal_putchar(' ');
     }
-    console_putchar('\n');
+    terminal_putchar('\n');
   } else {
-    console_putchar('\n');
+    terminal_putchar('\n');
   }
 
   u32 prev_tick = HAL_GetTick();
@@ -653,11 +653,11 @@ __NO_RETURN void enter_crash_screen(void) {
     WAIT_FOR_INTERRUPT();
     u16 vga_line = 0;
     if (vga_take_scanline_request(&vga_line)) {
-      console_render_scanline(vga_line);
+      terminal_render_scanline(vga_line);
     }
     if (vga_control.entering_vblank) {
       vga_control.entering_vblank = false;
-      console_setup_frame_config();
+      terminal_setup_frame_config();
     }
     u32 tick = HAL_GetTick();
     if (tick - prev_tick >= BLINK_DELAY) {

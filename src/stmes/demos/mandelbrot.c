@@ -2,8 +2,8 @@
 #include "stmes/kernel/task.h"
 #include "stmes/math.h"
 #include "stmes/utils.h"
-#include "stmes/video/console.h"
 #include "stmes/video/framebuf.h"
+#include "stmes/video/terminal.h"
 #include "stmes/video/vga.h"
 #include "stmes/video/vga_color.h"
 #include <math.h>
@@ -78,7 +78,7 @@ static void mandelbrot_task_fn(__UNUSED void* user_data) {
   const float ZOOM_SPEED = 1;
 
   while (true) {
-    console_clear_screen();
+    terminal_clear_screen();
     printf("x=%10.07f y=%10.07f z=%.7e", (double)camera_x, (double)camera_y, (double)camera_zoom);
 
     const float RADIUS = 2;
@@ -194,8 +194,8 @@ static void render_task_fn(__UNUSED void* user_data) {
 
       u16 y = vga_line / PIXEL_SCALE;
       // ASSERT(y < MANDELBROT_FRAME_HEIGHT);
-      if (y < CONSOLE_LINE_HEIGHT) {
-        console_render_scanline(vga_line);
+      if (y < TERMINAL_LINE_HEIGHT) {
+        terminal_render_scanline(vga_line);
       } else if (y < FRAME_HEIGHT) {
         struct PixelDmaBuffer* backbuf = swap_pixel_dma_buffers();
         vga_set_next_scanline(backbuf->data);

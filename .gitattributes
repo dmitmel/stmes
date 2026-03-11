@@ -1,4 +1,4 @@
 cubemx/** linguist-generated
 lib/FatFs/** linguist-vendored
 lib/printf/** linguist-vendored
-src/stmes/video/console_font.[ch] linguist-generated
+src/stmes/video/terminal_font.[ch] linguist-generated

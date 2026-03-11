@@ -5,7 +5,7 @@
 #include "stmes/kernel/task.h"
 #include "stmes/math.h"
 #include "stmes/utils.h"
-#include "stmes/video/console.h"
+#include "stmes/video/terminal.h"
 #include "stmes/video/vga.h"
 #include "stmes/video/vga_color.h"
 #include <math.h>
@@ -167,7 +167,7 @@ static void render_task_fn(__UNUSED void* user_data) {
       u16 vga_line = vga_control.next_scanline_nr;
       vga_control.next_scanline_requested = false;
       if (__atomic_load_n(&game_state.input_state, __ATOMIC_RELAXED) & INPUT_DEBUG) {
-        console_render_scanline(vga_line);
+        terminal_render_scanline(vga_line);
       } else {
         struct PixelDmaBuffer* backbuf = swap_pixel_dma_buffers();
         u32 y = vga_line / PIXEL_SCALE;
@@ -184,7 +184,7 @@ static void render_task_fn(__UNUSED void* user_data) {
     }
     if (vga_control.entering_vblank) {
       vga_control.entering_vblank = false;
-      console_setup_frame_config();
+      terminal_setup_frame_config();
       task_notify(&vblank_notification);
     }
   }

@@ -1,6 +1,6 @@
 target_sources(firmware PRIVATE
-  console.c
-  console_font.c
+  terminal.c
+  terminal_font.c
   framebuf.c
   vga.c
 )

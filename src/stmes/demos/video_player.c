@@ -108,11 +108,11 @@ void video_player_demo(void) {
 
   Systime video_start_time = systime_now();
 
-  bool show_console = false;
+  bool show_terminal = false;
   while (true) {
     if (unlikely(button_pressed)) {
       button_pressed = false;
-      show_console = !show_console;
+      show_terminal = !show_terminal;
       struct PixelDmaBuffer* frontbuf = swap_pixel_dma_buffers();
       struct PixelDmaBuffer* backbuf = swap_pixel_dma_buffers();
       vga_fast_memset(frontbuf->data, 0, FRAME_WIDTH);
@@ -239,7 +239,7 @@ void video_player_demo(void) {
       struct PixelDmaBuffer* real_backbuf = swap_pixel_dma_buffers();
       vga_set_next_scanline(real_backbuf->data);
       static struct PixelDmaBuffer fake_backbuf;
-      struct PixelDmaBuffer* backbuf = show_console ? &fake_backbuf : real_backbuf;
+      struct PixelDmaBuffer* backbuf = show_terminal ? &fake_backbuf : real_backbuf;
 
       vga_fast_memset(backbuf->data, 0, FRAME_WIDTH);
       backbuf->data[0] = backbuf->data[FRAME_WIDTH - 1] = VGA_ALL_RGB_PINS_RESET;
@@ -260,7 +260,7 @@ void video_player_demo(void) {
       }
 
       u32 end_time = DWT->CYCCNT;
-      if (show_console) {
+      if (show_terminal) {
         pixel_dma_buf_reset(real_backbuf);
         pixel_dma_buf_set(real_backbuf, 0, VGA_ALL_RGB_PINS);
         u32 len = MIN(1 + (end_time - start_time) * (FRAME_WIDTH - 1) / 6400, FRAME_WIDTH - 1);

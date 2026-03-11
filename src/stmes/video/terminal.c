@@ -1,10 +1,10 @@
 // TODO: Lock the state manipulation functions behind a mutex!
 
-#include "stmes/video/console.h"
+#include "stmes/video/terminal.h"
 #include "stmes/kernel/task.h"
 #include "stmes/utils.h"
-#include "stmes/video/console_font.h"
 #include "stmes/video/framebuf.h"
+#include "stmes/video/terminal_font.h"
 #include "stmes/video/vga.h"
 #include "stmes/video/vga_color.h"
 #include <printf.h>
@@ -12,99 +12,99 @@
 // Multiplying a byte by this constant will duplicate it across the byte lanes.
 #define SMEAR_8x4 0x01010101u
 
-static struct ConsoleBuffer {
+static struct TerminalBuffer {
   // The 8-bit characters and attributes are stored in 32-bit bundles to allow
   // fetching 4 items with one aligned 32-bit load.
-  char text[CONSOLE_LINES][(CONSOLE_COLUMNS + 3) / 4 * 4] __ALIGNED(4);
+  char text[TERMINAL_LINES][(TERMINAL_COLUMNS + 3) / 4 * 4] __ALIGNED(4);
   // Same goes for text attributes. The attributes themselves are encoded as
   // follows: the 4 low bits are for the foregound color, the high 4 are for
   // the background.
-  u8 text_attrs[CONSOLE_LINES][(CONSOLE_COLUMNS + 3) / 4 * 4] __ALIGNED(4);
+  u8 text_attrs[TERMINAL_LINES][(TERMINAL_COLUMNS + 3) / 4 * 4] __ALIGNED(4);
   // Also, the text lines array actually forms a ring buffer to enable quick
-  // scrolling of the console buffer.
+  // scrolling of the terminal buffer.
   u8 top_line;
   u8 cursor_col, cursor_line, current_text_attrs;
-} console_buffer = { 0 };
+} terminal_buffer = { 0 };
 
 // These colors are converted into pixel pin values below.
-static VgaPixel console_palette[16] = {
+static VgaPixel terminal_palette[16] = {
   0x000, 0xF00, 0x0F0, 0xFF0, 0x00F, 0xF0F, 0x0FF, 0xFFF,
   0x444, 0x800, 0x080, 0x880, 0x008, 0x808, 0x088, 0x888,
 };
 
-u8 console_get_current_color(void) {
-  return console_buffer.current_text_attrs;
+u8 terminal_get_current_color(void) {
+  return terminal_buffer.current_text_attrs;
 }
 
-void console_set_color(u8 color) {
-  console_buffer.current_text_attrs = color;
+void terminal_set_color(u8 color) {
+  terminal_buffer.current_text_attrs = color;
 }
 
-void console_set_char(u8 line, u8 col, char c) {
-  struct ConsoleBuffer* self = &console_buffer;
+void terminal_set_char(u8 line, u8 col, char c) {
+  struct TerminalBuffer* self = &terminal_buffer;
   self->text[line][col] = c;
   self->text_attrs[line][col] = self->current_text_attrs;
 }
 
-void console_set_cursor_line(u8 line) {
-  struct ConsoleBuffer* self = &console_buffer;
-  self->cursor_line = (self->top_line + line) % CONSOLE_LINES;
+void terminal_set_cursor_line(u8 line) {
+  struct TerminalBuffer* self = &terminal_buffer;
+  self->cursor_line = (self->top_line + line) % TERMINAL_LINES;
 }
 
-void console_clear_line(u8 line) {
-  struct ConsoleBuffer* self = &console_buffer;
+void terminal_clear_line(u8 line) {
+  struct TerminalBuffer* self = &terminal_buffer;
   u8 attr = self->current_text_attrs;
   // Note how we can *assign* four characters at a time as well.
   fast_memset_u32((u32*)self->text[line], ' ' * SMEAR_8x4, SIZEOF(self->text[0]) / 4);
   fast_memset_u32((u32*)self->text_attrs[line], attr * SMEAR_8x4, SIZEOF(self->text_attrs[0]) / 4);
 }
 
-void console_clear_cursor_line(void) {
-  struct ConsoleBuffer* self = &console_buffer;
-  console_clear_line(self->cursor_line);
+void terminal_clear_cursor_line(void) {
+  struct TerminalBuffer* self = &terminal_buffer;
+  terminal_clear_line(self->cursor_line);
 }
 
-void console_clear_screen(void) {
-  struct ConsoleBuffer* self = &console_buffer;
+void terminal_clear_screen(void) {
+  struct TerminalBuffer* self = &terminal_buffer;
   self->cursor_col = self->cursor_line = self->top_line = 0;
-  self->current_text_attrs = CONSOLE_TEXT_ATTRS_RESET;
-  for (usize line = 0; line < CONSOLE_LINES; line++) {
-    console_clear_line(line);
+  self->current_text_attrs = TERMINAL_TEXT_ATTRS_RESET;
+  for (usize line = 0; line < TERMINAL_LINES; line++) {
+    terminal_clear_line(line);
   }
 }
 
-void console_new_line(void) {
-  struct ConsoleBuffer* self = &console_buffer;
-  self->cursor_line = (self->cursor_line + 1) % CONSOLE_LINES;
+void terminal_new_line(void) {
+  struct TerminalBuffer* self = &terminal_buffer;
+  self->cursor_line = (self->cursor_line + 1) % TERMINAL_LINES;
   if (self->cursor_line == self->top_line) {
-    self->top_line = (self->top_line + 1) % CONSOLE_LINES;
-    console_clear_line(self->cursor_line);
+    self->top_line = (self->top_line + 1) % TERMINAL_LINES;
+    terminal_clear_line(self->cursor_line);
   }
   self->cursor_col = 0;
 }
 
-void console_putchar(char c) {
-  struct ConsoleBuffer* self = &console_buffer;
+void terminal_putchar(char c) {
+  struct TerminalBuffer* self = &terminal_buffer;
   if (c == '\n') {
-    console_new_line();
+    terminal_new_line();
   } else if (c == '\r') {
     self->cursor_col = 0;
   } else {
-    console_set_char(self->cursor_line, self->cursor_col, c);
+    terminal_set_char(self->cursor_line, self->cursor_col, c);
     self->cursor_col += 1;
-    if (self->cursor_col >= CONSOLE_COLUMNS) {
-      console_new_line();
+    if (self->cursor_col >= TERMINAL_COLUMNS) {
+      terminal_new_line();
     }
   }
 }
 
-void console_print(const char* str) {
+void terminal_print(const char* str) {
   while (*str != 0) {
-    console_putchar(*str++);
+    terminal_putchar(*str++);
   }
 }
 
-void console_setup_frame_config(void) {
+void terminal_setup_frame_config(void) {
   struct VgaFrameConfig frame = {
     .line_length = FRAME_WIDTH + 1,
     .lines_count = FRAME_HEIGHT * PIXEL_SCALE,
@@ -115,27 +115,27 @@ void console_setup_frame_config(void) {
 }
 
 // GCC_ATTRIBUTE(optimize("-Os"))
-bool console_render_scanline(u16 vga_line) {
-  usize y = vga_line / PIXEL_SCALE - (FRAME_HEIGHT - CONSOLE_FRAME_HEIGHT) / 2;
-  if (y >= CONSOLE_FRAME_HEIGHT) return false;
+bool terminal_render_scanline(u16 vga_line) {
+  usize y = vga_line / PIXEL_SCALE - (FRAME_HEIGHT - TERMINAL_FRAME_HEIGHT) / 2;
+  if (y >= TERMINAL_FRAME_HEIGHT) return false;
 
-  struct ConsoleBuffer* self = &console_buffer;
+  struct TerminalBuffer* self = &terminal_buffer;
   struct PixelDmaBuffer* backbuf = swap_pixel_dma_buffers();
   vga_set_next_scanline(backbuf->data);
 
-  usize line_nr = y / CONSOLE_LINE_HEIGHT, char_y = y % CONSOLE_LINE_HEIGHT;
-  usize x = (FRAME_WIDTH - CONSOLE_FRAME_WIDTH) / 2;
-  if (char_y >= CONSOLE_FONT_HEIGHT) {
+  usize line_nr = y / TERMINAL_LINE_HEIGHT, char_y = y % TERMINAL_LINE_HEIGHT;
+  usize x = (FRAME_WIDTH - TERMINAL_FRAME_WIDTH) / 2;
+  if (char_y >= TERMINAL_FONT_HEIGHT) {
     vga_fast_memset(backbuf->data, 0, FRAME_WIDTH);
     return false;
   }
 
   vga_fast_memset(backbuf->data, 0, x);
-  usize last_x = x + CONSOLE_FRAME_WIDTH;
+  usize last_x = x + TERMINAL_FRAME_WIDTH;
   vga_fast_memset(backbuf->data + last_x, 0, FRAME_WIDTH - last_x);
 
   // Apply the vertical scroll.
-  line_nr = (self->top_line + line_nr) % CONSOLE_LINES;
+  line_nr = (self->top_line + line_nr) % TERMINAL_LINES;
 
   // NOTE: The timing is CRITICAL in the code below!!!
 
@@ -147,9 +147,9 @@ bool console_render_scanline(u16 vga_line) {
   // y=0 row of every character, then the block for the row at y=1 and so on
   // and so on) to improve cache locality because we are going to be accessing
   // only the same single vertical slice of each character.
-  const u8* font_row_data = &CONSOLE_FONT_DATA[char_y * CONSOLE_FONT_CHARACTERS];
-  for (usize col_nr = 0; col_nr < CONSOLE_COLUMNS; col_nr += 4) {
-    usize actually_fetched_chars = MIN(4, CONSOLE_COLUMNS - col_nr);
+  const u8* font_row_data = &TERMINAL_FONT_DATA[char_y * TERMINAL_FONT_CHARACTERS];
+  for (usize col_nr = 0; col_nr < TERMINAL_COLUMNS; col_nr += 4) {
+    usize actually_fetched_chars = MIN(4, TERMINAL_COLUMNS - col_nr);
     // Note that here we fetch 4 characters and attributes at once.
     u32 chars = *text++;
     u32 char_attrs = *attrs++;
@@ -159,7 +159,7 @@ bool console_render_scanline(u16 vga_line) {
       // If so, locate the one under the cursor and replace its attributes.
       u32 shift = (cursor_col % 4) * 8;
       char_attrs &= ~(MASK(8) << shift);
-      char_attrs |= (CONSOLE_CURSOR_TEXT_ATTRS << shift);
+      char_attrs |= (TERMINAL_CURSOR_TEXT_ATTRS << shift);
     }
 
     // Now comes a bit of SIMD trickery. First, we subtract (in parallel) 0x20
@@ -171,9 +171,9 @@ bool console_render_scanline(u16 vga_line) {
     // characters in the font. This is done by exploiting the fact that the
     // SIMD operations for parallel addition/subtraction set flags on the
     // special APSR.GE register depending on whether the result has overflowed.
-    __USUB8(SMEAR_8x4 * CONSOLE_FONT_CHARACTERS, chars);
+    __USUB8(SMEAR_8x4 * TERMINAL_FONT_CHARACTERS, chars);
     // And, finally, we select the characters which passed the condition above
-    // (char_idx < CONSOLE_FONT_CHARACTERS), replacing those that didn't. The
+    // (char_idx < TERMINAL_FONT_CHARACTERS), replacing those that didn't. The
     // logic here is the usub8 instruction above will set the APSR.GE flags
     // corresponding to each byte of the result that is >= 0, and consequently,
     // the sel instruction chooses (in parallel) between the bytes of two
@@ -197,13 +197,13 @@ bool console_render_scanline(u16 vga_line) {
     u32 font_bytes = font_byte1 | (font_byte2 << 8) | (font_byte3 << 16) | (font_byte4 << 24);
 
     // Aaaaaand finally we can output some pixels!
-    for (VgaPixel* end = pixel_ptr + CONSOLE_FONT_WIDTH * actually_fetched_chars; pixel_ptr != end;
+    for (VgaPixel* end = pixel_ptr + TERMINAL_FONT_WIDTH * actually_fetched_chars; pixel_ptr != end;
          font_bytes >>= 8, char_attrs >>= 8) {
       // Same story with the indexes and loads as above.
       usize fg_idx = char_attrs & MASK(4), bg_idx = (char_attrs >> 4) & MASK(4);
       // The RAM cache does a pretty good job at keeping these around for
       // strides of characters with the same colors.
-      VgaPixel fg = console_palette[fg_idx], bg = console_palette[bg_idx];
+      VgaPixel fg = terminal_palette[fg_idx], bg = terminal_palette[bg_idx];
       if ((font_bytes & 0xFF) != 0) {
         usize i = 0;
         // I'm using the poor man's loop unroller here (the macro simply
@@ -215,7 +215,7 @@ bool console_render_scanline(u16 vga_line) {
           // it here - just dumb copying and assigning every pixel is twice as
           // fast than anything I could come up with for detecting and skipping
           // the unchanged pixel values.
-          if (i++ < CONSOLE_FONT_WIDTH) {
+          if (i++ < TERMINAL_FONT_WIDTH) {
             // This should more or less compile to 3 instructions per pixel:
             //
             // sub fg_bg, fg, bg
@@ -235,7 +235,7 @@ bool console_render_scanline(u16 vga_line) {
         // A fast path for blank characters, speeds up the rendering in such
         // cases by ~33%.
         UNROLL_8({
-          if (i++ < CONSOLE_FONT_WIDTH) *pixel_ptr++ = bg;
+          if (i++ < TERMINAL_FONT_WIDTH) *pixel_ptr++ = bg;
         });
       }
     }
@@ -244,35 +244,35 @@ bool console_render_scanline(u16 vga_line) {
   return true;
 }
 
-void console_init(void) {
-  for (usize i = 0; i < SIZEOF(console_palette); i++) {
-    console_palette[i] = rgb12_to_vga_pins(console_palette[i]);
+void terminal_init(void) {
+  for (usize i = 0; i < SIZEOF(terminal_palette); i++) {
+    terminal_palette[i] = rgb12_to_vga_pins(terminal_palette[i]);
   }
-  console_clear_screen();
+  terminal_clear_screen();
 }
 
-static void console_render_task_fn(__UNUSED void* param) {
+static void terminal_drawing_task_fn(__UNUSED void* param) {
   while (true) {
     task_wait(&vga_notification, NO_DEADLINE);
     if (vga_control.next_scanline_requested) {
       vga_control.next_scanline_requested = false;
-      console_render_scanline(vga_control.next_scanline_nr);
+      terminal_render_scanline(vga_control.next_scanline_nr);
     }
     if (vga_control.entering_vblank) {
       vga_control.entering_vblank = false;
-      console_setup_frame_config();
+      terminal_setup_frame_config();
     }
   }
 }
 
-struct Task console_render_task;
-static u8 console_render_task_stack[1024] __ALIGNED(8);
+struct Task terminal_drawing_task;
+static u8 terminal_drawing_task_stack[1024] __ALIGNED(8);
 
-void start_console_render_task(void) {
-  struct TaskParams render_task_params = {
-    .stack_start = console_render_task_stack,
-    .stack_size = sizeof(console_render_task_stack),
-    .func = &console_render_task_fn,
+void start_terminal_drawing_task(void) {
+  struct TaskParams drawing_task_params = {
+    .stack_start = terminal_drawing_task_stack,
+    .stack_size = sizeof(terminal_drawing_task_stack),
+    .func = &terminal_drawing_task_fn,
   };
-  task_spawn(&console_render_task, &render_task_params);
+  task_spawn(&terminal_drawing_task, &drawing_task_params);
 }

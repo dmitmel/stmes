@@ -1,8 +1,8 @@
+#include "stmes/video/terminal.h"
 #include "stmes/demos.h"
 #include "stmes/fatfs.h"
 #include "stmes/kernel/task.h"
 #include "stmes/utils.h"
-#include "stmes/video/console.h"
 #include <ff.h>
 #include <printf.h>
 
@@ -37,8 +37,8 @@ static void terminal_task_fn(__UNUSED void* user_data) {
   };
 
   for (usize i = 0; i < SIZEOF(code_tokens); i++) {
-    console_set_color(code_tokens[i].color);
-    console_print(code_tokens[i].str);
+    terminal_set_color(code_tokens[i].color);
+    terminal_print(code_tokens[i].str);
   }
   task_sleep(1000);
 
@@ -71,7 +71,7 @@ static void terminal_task_fn(__UNUSED void* user_data) {
 }
 
 void terminal_demo(void) {
-  start_console_render_task();
+  start_terminal_drawing_task();
 
   struct TaskParams terminal_task_params = {
     .stack_start = terminal_task_stack,

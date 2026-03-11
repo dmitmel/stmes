@@ -7,7 +7,7 @@
 #include "stmes/kernel/time.h"
 #include "stmes/stm32_hal_utils.h"
 #include "stmes/utils.h"
-#include "stmes/video/console.h"
+#include "stmes/video/terminal.h"
 #include "stmes/video/vga.h"
 #include <stm32f4xx_hal.h>
 
@@ -25,7 +25,7 @@ static void main_task_launcher(void* initial_stack_ptr);
 static void system_clock_config(void);
 
 int main(void) {
-  console_init();
+  terminal_init();
 
   gpio_init();
 

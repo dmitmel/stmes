@@ -1,6 +1,6 @@
 firmware_sources += files(
-  'console.c',
-  'console_font.c',
+  'terminal.c',
+  'terminal_font.c',
   'framebuf.c',
   'vga.c',
 )

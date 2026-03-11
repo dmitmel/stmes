@@ -5,7 +5,7 @@
 #include "stmes/kernel/crash.h"
 #include "stmes/kernel/sync.h"
 #include "stmes/utils.h"
-#include "stmes/video/console.h"
+#include "stmes/video/terminal.h"
 #include <errno.h>
 #include <malloc.h>
 #include <printf.h>
@@ -72,7 +72,7 @@ void _putchar(char c) {
 #else
 
 void _putchar(char c) {
-  console_putchar(c);
+  terminal_putchar(c);
 #if ENABLE_SEGGER_RTT_LOGGING
   while (SEGGER_RTT_PutChar(0, c) != 1) {
     task_yield();
@@ -83,7 +83,7 @@ void _putchar(char c) {
 ssize_t _write(int fd, const char* buf, size_t len) {
   if (fd == STDOUT_FILENO || fd == STDERR_FILENO) {
     for (const char *ptr = buf, *end = ptr + len; ptr != end; ptr++) {
-      console_putchar(*ptr);
+      terminal_putchar(*ptr);
     }
 #if ENABLE_SEGGER_RTT_LOGGING
     while (len > 0) {

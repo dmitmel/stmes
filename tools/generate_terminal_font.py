@@ -2,7 +2,7 @@ from pathlib import Path
 
 from PIL import Image
 
-project_dir = Path(__file__).resolve().parent
+project_dir = Path(__file__).resolve().parent.parent
 src_dir = project_dir / "src"
 res_dir = project_dir / "res"
 
@@ -21,13 +21,13 @@ def compile_font(char_width: int, char_height: int, image_path: Path, output_pat
     print('extern "C" {', file=file)
     print("#endif", file=file)
     print("", file=file)
-    print(f"#define CONSOLE_FONT_WIDTH {char_width}", file=file)
-    print(f"#define CONSOLE_FONT_HEIGHT {char_height}", file=file)
-    print(f"#define CONSOLE_FONT_CHARACTERS {font_chars}", file=file)
-    print(f"#define CONSOLE_FONT_BYTES_PER_ROW {bytes_per_row}", file=file)
-    print(f"#define CONSOLE_FONT_BYTES_PER_CHAR {bytes_per_row * char_height}", file=file)
+    print(f"#define TERMINAL_FONT_WIDTH {char_width}", file=file)
+    print(f"#define TERMINAL_FONT_HEIGHT {char_height}", file=file)
+    print(f"#define TERMINAL_FONT_CHARACTERS {font_chars}", file=file)
+    print(f"#define TERMINAL_FONT_BYTES_PER_ROW {bytes_per_row}", file=file)
+    print(f"#define TERMINAL_FONT_BYTES_PER_CHAR {bytes_per_row * char_height}", file=file)
     print("", file=file)
-    print("extern const unsigned char CONSOLE_FONT_DATA[];", file=file)
+    print("extern const unsigned char TERMINAL_FONT_DATA[];", file=file)
     print("", file=file)
     print("#ifdef __cplusplus", file=file)
     print("}", file=file)
@@ -35,9 +35,9 @@ def compile_font(char_width: int, char_height: int, image_path: Path, output_pat
 
   with open(output_path.with_suffix(".c"), "w") as file:
     print(f"// This file was generated from {image_path_rel}", file=file)
-    print('#include "console_font.h"', file=file)
+    print('#include "terminal_font.h"', file=file)
     print("", file=file)
-    print("const unsigned char CONSOLE_FONT_DATA[] = {", file=file)
+    print("const unsigned char TERMINAL_FONT_DATA[] = {", file=file)
     for y in range(char_height):
       print("  ", end="", file=file)
       for char in range(font_chars):
@@ -55,4 +55,4 @@ def compile_font(char_width: int, char_height: int, image_path: Path, output_pat
     print("};", file=file)
 
 
-compile_font(5, 8, res_dir / "fonts" / "5x8.png", src_dir / "stmes" / "video" / "console_font")
+compile_font(5, 8, res_dir / "fonts" / "5x8.png", src_dir / "stmes" / "video" / "terminal_font")

@@ -2,7 +2,7 @@
 #include "stmes/kernel/sync.h"
 #include "stmes/kernel/task.h"
 #include "stmes/utils.h"
-#include "stmes/video/console.h"
+#include "stmes/video/terminal.h"
 #include <printf.h>
 
 static struct {
@@ -10,26 +10,26 @@ static struct {
   struct Task task;
 } print_tasks[8];
 
-static struct Mutex console_mutex;
+static struct Mutex terminal_mutex;
 
 static void print_task_fn(__UNUSED void* user_data) {
   u32 task_idx = (u32)user_data;
   u32 counter = 0;
   while (true) {
-    mutex_lock(&console_mutex);
-    console_set_cursor_line(task_idx);
-    console_clear_cursor_line();
+    mutex_lock(&terminal_mutex);
+    terminal_set_cursor_line(task_idx);
+    terminal_clear_cursor_line();
     printf("%" PRIu32 " %" PRIu32 "\n", task_idx, counter);
     counter += 1;
-    mutex_unlock(&console_mutex);
+    mutex_unlock(&terminal_mutex);
     task_sleep(task_idx + 1);
   }
 }
 
 void print_tasks_demo(void) {
-  mutex_init(&console_mutex);
+  mutex_init(&terminal_mutex);
 
-  start_console_render_task();
+  start_terminal_drawing_task();
 
   for (usize i = 0; i < SIZEOF(print_tasks); i++) {
     struct TaskParams params = {

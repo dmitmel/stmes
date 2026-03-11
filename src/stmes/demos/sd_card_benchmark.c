@@ -3,7 +3,7 @@
 #include "stmes/fatfs.h"
 #include "stmes/kernel/task.h"
 #include "stmes/utils.h"
-#include "stmes/video/console.h"
+#include "stmes/video/terminal.h"
 #include <ff.h>
 #include <printf.h>
 
@@ -122,7 +122,7 @@ static void progress_task_fn(__UNUSED void* user_data) {
   Systime start_time = systime_now();
   while (true) {
     task_wait(&progress_task_notify, NO_DEADLINE);
-    console_clear_cursor_line();
+    terminal_clear_cursor_line();
     u32 percent = f_tell(&SDFile) * 100 / f_size(&SDFile);
     Systime elapsed_time = systime_now() - start_time;
     printf("\r%" PRIu32 "%% %" PRIu32, percent, (u32)systime_as_millis(elapsed_time));
@@ -133,7 +133,7 @@ static void progress_task_fn(__UNUSED void* user_data) {
 void sd_card_benchmark(void) {
   task_notify_init(&progress_task_notify);
 
-  start_console_render_task();
+  start_terminal_drawing_task();
 
   struct TaskParams test_task_params = {
     .stack_start = test_task_stack,

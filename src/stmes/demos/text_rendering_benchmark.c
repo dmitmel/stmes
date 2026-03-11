@@ -1,7 +1,7 @@
 #include "stmes/demos.h"
 #include "stmes/kernel/task.h"
 #include "stmes/utils.h"
-#include "stmes/video/console.h"
+#include "stmes/video/terminal.h"
 #include "stmes/video/vga.h"
 #include <printf.h>
 
@@ -21,7 +21,7 @@ static void render_task_fn(__UNUSED void* user_data) {
     u16 vga_line;
     if (vga_take_scanline_request(&vga_line)) {
       u32 start_time = DWT->CYCCNT;
-      bool did_render = console_render_scanline(vga_line);
+      bool did_render = terminal_render_scanline(vga_line);
       u32 end_time = DWT->CYCCNT;
       if (did_render && scanline_timings_count < SIZEOF(scanline_timings)) {
         scanline_timings[scanline_timings_count++] = end_time - start_time;
@@ -29,7 +29,7 @@ static void render_task_fn(__UNUSED void* user_data) {
     }
     if (vga_control.entering_vblank) {
       vga_control.entering_vblank = false;
-      console_setup_frame_config();
+      terminal_setup_frame_config();
       task_notify(&vblank_notification);
     }
   }
@@ -51,11 +51,11 @@ static void timings_task_fn(__UNUSED void* user_data) {
     }
 
     for (usize i = 0; i < len; i++) {
-      console_set_color(i % 16);
+      terminal_set_color(i % 16);
       printf("%" PRIu32 " ", copied_timings[i]);
     }
 
-    console_set_color(CONSOLE_TEXT_ATTRS_RESET);
+    terminal_set_color(TERMINAL_TEXT_ATTRS_RESET);
     printf("\n");
     printf("min: %" PRIu32 ", max: %" PRIu32 ", avg: %" PRIu32, min, max, sum / len);
 
