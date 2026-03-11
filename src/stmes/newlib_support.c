@@ -17,6 +17,7 @@
 #include "stmes/config.h"
 
 #if ENABLE_SEGGER_RTT_LOGGING
+#include "stmes/kernel/task.h"
 #include <SEGGER_RTT.h>
 #endif
 
@@ -73,7 +74,9 @@ void _putchar(char c) {
 void _putchar(char c) {
   console_putchar(c);
 #if ENABLE_SEGGER_RTT_LOGGING
-  while (SEGGER_RTT_PutChar(0, c) != 1);
+  while (SEGGER_RTT_PutChar(0, c) != 1) {
+    task_yield();
+  }
 #endif
 }
 
@@ -85,6 +88,7 @@ ssize_t _write(int fd, const char* buf, size_t len) {
 #if ENABLE_SEGGER_RTT_LOGGING
     while (len > 0) {
       unsigned int written = SEGGER_RTT_Write(0, buf, len);
+      if (written != len) task_yield();
       buf += written, len -= written;
     }
 #endif

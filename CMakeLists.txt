@@ -409,9 +409,8 @@ target_compile_definitions(stm32f4xx_hal PUBLIC
   STM32F4xx STM32F411xE USE_HAL_DRIVER USE_FULL_LL_DRIVER
 )
 
-option(SEGGER_RTT "" ON)
+option(SEGGER_RTT "" OFF)
 if(SEGGER_RTT)
-  target_compile_definitions(firmware PUBLIC ENABLE_SEGGER_RTT)
   target_link_libraries(firmware PUBLIC segger_rtt)
 endif()
 
